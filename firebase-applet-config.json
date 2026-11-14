@@ -3,6 +3,7 @@
   "appId": "1:381227075480:web:32c8a198d1725bc9a2cded",
   "apiKey": "AIzaSyDnkdCYUb8nmlgRzCuEtTi7zovH7EUgseQ",
   "authDomain": "reelvision.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-ba079ecb-c9b9-44d1-824e-6b8eda429bbc",
   "storageBucket": "reelvision.firebasestorage.app",
   "messagingSenderId": "381227075480",
   "measurementId": "",

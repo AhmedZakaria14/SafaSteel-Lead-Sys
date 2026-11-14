@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import crypto from 'node:crypto';
 import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
 import { SqlDb } from './db.ts';
@@ -9,6 +10,55 @@ if (!getApps().length && firebaseConfig?.projectId && firebaseConfig.projectId !
   initializeApp({
     projectId: firebaseConfig.projectId,
   });
+}
+
+export const MASTER_OWNER_EMAIL = 'azeco77@gmail.com';
+const ALSAFA_BIZ_ID = 'alsafa-steel-workspace';
+
+async function syncAuthorizedEmailFromAdminFirestore(db: SqlDb, user: AuthUser): Promise<void> {
+  if (user.isOwner || user.isDemoUser) return;
+  const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
+  if (!dbId || !getApps().length) return;
+
+  try {
+    const existing = db
+      .prepare("SELECT id FROM business_memberships WHERE business_id = ? AND user_id = ? AND status = 'active'")
+      .get(ALSAFA_BIZ_ID, user.id);
+    if (existing) return;
+
+    const adminFs = getAdminFirestore(getApps()[0], dbId);
+    const snap = await Promise.race([
+      adminFs.collection('authorized_emails').doc(user.email.toLowerCase()).get(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
+    ]);
+    if (!snap || !snap.exists) return;
+    const data = snap.data() as Record<string, any> | undefined;
+    if (!data || data.status === 'inactive') return;
+
+    const now = new Date().toISOString();
+    const slot = data.accountType === 'manager' ? 'manager' : 'accountant';
+    db.prepare(`
+      INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'business_admin', 'active', ?, ?)
+      ON CONFLICT(business_id, invited_email) DO UPDATE SET
+        user_id = excluded.user_id,
+        account_slot = excluded.account_slot,
+        role = 'business_admin',
+        status = 'active',
+        updated_at = excluded.updated_at
+    `).run(
+      crypto.randomUUID(),
+      ALSAFA_BIZ_ID,
+      user.id,
+      user.email.toLowerCase(),
+      data.displayName || user.fullName,
+      slot,
+      now,
+      now
+    );
+  } catch {
+    // Ignore when running locally without GCP service credentials; client Firestore sync handles enrollment
+  }
 }
 
 export type Role = 'super_admin' | 'business_admin' | 'manager' | 'employee';
@@ -20,6 +70,7 @@ export interface AuthUser {
   fullName: string;
   isDemoUser: boolean;
   isPlatformSuperAdmin: boolean;
+  isOwner: boolean;
 }
 
 export interface AuthRequest extends Request {
@@ -29,6 +80,7 @@ export interface AuthRequest extends Request {
     business_id: string;
     role: Role;
     status: string;
+    account_slot?: 'manager' | 'accountant';
   };
   rawBody?: Buffer;
 }
@@ -60,6 +112,7 @@ export function upsertUserFromAuth(
 ): AuthUser {
   const now = new Date().toISOString();
   const normalizedEmail = payload.email.toLowerCase().trim();
+  const isOwner = normalizedEmail === MASTER_OWNER_EMAIL;
   const existingByUid = db.prepare('SELECT * FROM users WHERE firebase_uid = ?').get(payload.uid) as any;
   const existingByEmail = !existingByUid
     ? (db.prepare('SELECT * FROM users WHERE LOWER(email) = ?').get(normalizedEmail) as any)
@@ -67,19 +120,19 @@ export function upsertUserFromAuth(
   const existing = existingByUid || existingByEmail;
 
   let userId: string;
-  let isPlatformSuperAdmin = 0;
+  let isPlatformSuperAdmin = isOwner ? 1 : 0;
 
   if (existing) {
     userId = existing.id;
-    isPlatformSuperAdmin = existing.is_platform_super_admin || 0;
+    isPlatformSuperAdmin = isOwner ? 1 : existing.is_platform_super_admin || 0;
     db.prepare(`
       UPDATE users
-      SET firebase_uid = ?, email = ?, full_name = COALESCE(NULLIF(?, ''), full_name), avatar_url = COALESCE(?, avatar_url), updated_at = ?
+      SET firebase_uid = ?, email = ?, full_name = COALESCE(NULLIF(?, ''), full_name), avatar_url = COALESCE(?, avatar_url),
+          is_platform_super_admin = ?, updated_at = ?
       WHERE id = ?
-    `).run(payload.uid, normalizedEmail, payload.name || '', payload.picture || null, now, userId);
+    `).run(payload.uid, normalizedEmail, payload.name || '', payload.picture || null, isPlatformSuperAdmin, now, userId);
   } else {
     userId = crypto.randomUUID();
-    isPlatformSuperAdmin = normalizedEmail === 'azeco77@gmail.com' ? 1 : 0;
     db.prepare(`
       INSERT INTO users (id, firebase_uid, email, full_name, avatar_url, default_language, theme, is_platform_super_admin, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, 'ar', 'light', ?, ?, ?)
@@ -95,12 +148,39 @@ export function upsertUserFromAuth(
     );
   }
 
-  // Activate any pending workspace invitations for this email
+  // Activate any pending or pre-seeded workspace memberships for this email
   db.prepare(`
     UPDATE business_memberships
-    SET user_id = ?, status = 'active', updated_at = ?
-    WHERE LOWER(invited_email) = ? AND status = 'invited'
+    SET user_id = ?,
+        status = CASE WHEN status = 'invited' THEN 'active' ELSE status END,
+        updated_at = ?
+    WHERE LOWER(invited_email) = ? AND status != 'inactive'
   `).run(userId, now, normalizedEmail);
+
+  // Guarantee Master Owner (azeco77@gmail.com) always has full business_admin Manager membership on Al-Safa Steel
+  if (isOwner) {
+    const alsafaExists = db.prepare('SELECT id FROM businesses WHERE id = ?').get(ALSAFA_BIZ_ID);
+    if (alsafaExists) {
+      db.prepare(`
+        INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, 'manager', 'business_admin', 'active', ?, ?)
+        ON CONFLICT(business_id, invited_email) DO UPDATE SET
+          user_id = excluded.user_id,
+          account_slot = 'manager',
+          role = 'business_admin',
+          status = 'active',
+          updated_at = excluded.updated_at
+      `).run(
+        crypto.randomUUID(),
+        ALSAFA_BIZ_ID,
+        userId,
+        MASTER_OWNER_EMAIL,
+        payload.name || 'المدير (المالك الرئيسي) | Manager (Owner)',
+        now,
+        now
+      );
+    }
+  }
 
   return {
     id: userId,
@@ -109,6 +189,7 @@ export function upsertUserFromAuth(
     fullName: payload.name || existing?.full_name || normalizedEmail.split('@')[0],
     isDemoUser: false,
     isPlatformSuperAdmin: Boolean(isPlatformSuperAdmin),
+    isOwner,
   };
 }
 
@@ -121,7 +202,9 @@ export function createAuthMiddleware(db: SqlDb, verifier: TokenVerifier = defaul
       const token = authHeader.slice('Bearer '.length).trim();
       try {
         const verified = await verifier(token);
-        req.authUser = upsertUserFromAuth(db, verified);
+        const user = upsertUserFromAuth(db, verified);
+        await syncAuthorizedEmailFromAdminFirestore(db, user);
+        req.authUser = user;
         return next();
       } catch (err) {
         return res.status(401).json({ error: 'Unauthorized: Invalid or expired authentication token' });
@@ -130,12 +213,13 @@ export function createAuthMiddleware(db: SqlDb, verifier: TokenVerifier = defaul
 
     if (isDemoHeader) {
       req.authUser = {
-        id: 'demo-user-admin',
-        firebaseUid: 'demo-uid-demo-user-admin',
-        email: 'demo-admin@leadflow.local',
-        fullName: 'أحمد العتيبي / Ahmed Al-Otaibi',
+        id: 'alsafa-owner-manager',
+        firebaseUid: 'demo-uid-alsafa-owner-manager',
+        email: MASTER_OWNER_EMAIL,
+        fullName: 'المدير (المالك الرئيسي) | Manager (Owner)',
         isDemoUser: true,
-        isPlatformSuperAdmin: false,
+        isPlatformSuperAdmin: true,
+        isOwner: true,
       };
       return next();
     }
@@ -181,31 +265,42 @@ export function requireBusinessAccess(db: SqlDb, allowedRoles?: Role[]) {
         business_id: businessId,
         role: effectiveRole,
         status: 'active',
+        account_slot: 'manager',
       };
       return next();
     }
 
     const membership = db
       .prepare(
-        `SELECT id, business_id, role, status FROM business_memberships
+        `SELECT id, business_id, role, status, account_slot FROM business_memberships
          WHERE business_id = ? AND user_id = ? AND status = 'active'`
       )
       .get(businessId, req.authUser.id) as
-      | { id: string; business_id: string; role: Role; status: string }
+      | { id: string; business_id: string; role: Role; status: string; account_slot?: 'manager' | 'accountant' }
       | undefined;
 
     if (!membership) {
+      if (req.authUser.isOwner && business.id === ALSAFA_BIZ_ID) {
+        req.membership = {
+          id: 'owner-membership',
+          business_id: businessId,
+          role: 'business_admin',
+          status: 'active',
+          account_slot: 'manager',
+        };
+        return next();
+      }
       if (req.authUser.isPlatformSuperAdmin && business.is_demo === 0) {
         // Super admins still require explicit membership unless managing platform; keep strict tenant boundary unless member
         return res.status(403).json({ error: 'Forbidden: You do not have access to this business workspace' });
       }
-      if (business.is_demo === 1) {
-        // Authenticated users can preview isolated demo workspaces as business_admin
+      if (business.is_demo === 1 && req.authUser.isOwner) {
         req.membership = {
-          id: 'demo-preview',
+          id: 'owner-demo-access',
           business_id: businessId,
           role: 'business_admin',
           status: 'active',
+          account_slot: 'manager',
         };
         return next();
       }

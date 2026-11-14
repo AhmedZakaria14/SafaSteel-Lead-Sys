@@ -332,4 +332,94 @@ describe('LeadFlow CRM Acceptance Tests', () => {
     const testNotifJson = await testNotifRes.json();
     assert.ok(testNotifJson.notification.link_path.startsWith('/leads/'));
   });
+
+  it('18. Enforces 2 full-access accounts, recognizes azeco77@gmail.com as Master Owner, and lets Owner grant full access to another email', async () => {
+    const membersRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/members`, {
+      headers: { 'x-demo-session': 'true' },
+    });
+    assert.equal(membersRes.status, 200);
+    const membersData = await membersRes.json();
+    assert.equal(membersData.members.length, 2);
+    assert.ok(membersData.members.every((m: any) => m.role === 'business_admin'));
+    assert.ok(membersData.members.some((m: any) => m.invited_email === 'azeco77@gmail.com' && m.account_slot === 'manager'));
+    assert.ok(membersData.members.some((m: any) => m.account_slot === 'accountant'));
+
+    // Sign in as Master Owner azeco77@gmail.com via Google Auth
+    const ownerAppDb = db;
+    const ownerMeRes = await (async () => {
+      const app2 = buildApp({
+        db: ownerAppDb,
+        tokenVerifier: async (t: string) => {
+          if (t === 'token-owner') {
+            return { uid: 'uid-owner-azeco', email: 'azeco77@gmail.com', name: 'Ahmed Zakaria' };
+          }
+          if (t === 'token-granted-accountant') {
+            return { uid: 'uid-acc-2', email: 'finance.safa@gmail.com', name: 'Mahmoud Accountant' };
+          }
+          throw new Error('Unauthorized');
+        },
+      });
+      const srv2 = await new Promise<http.Server>((resolve) => {
+        const s = app2.listen(0, '127.0.0.1', () => resolve(s));
+      });
+      const port2 = (srv2.address() as any).port;
+      try {
+        const me = await fetch(`http://127.0.0.1:${port2}/api/me`, {
+          headers: { Authorization: 'Bearer token-owner' },
+        });
+        const meJson = await me.json();
+        assert.equal(me.status, 200);
+        assert.equal(meJson.user.isOwner, true);
+        assert.ok(meJson.businesses.some((b: any) => b.id === 'alsafa-steel-workspace'));
+
+        // Owner grants full access to finance.safa@gmail.com as Accountant
+        const grantRes = await fetch(`http://127.0.0.1:${port2}/api/businesses/alsafa-steel-workspace/members/invite`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer token-owner',
+          },
+          body: JSON.stringify({
+            email: 'finance.safa@gmail.com',
+            displayName: 'محاسب الصفا ستيل',
+            accountSlot: 'accountant',
+            role: 'business_admin',
+          }),
+        });
+        assert.equal(grantRes.status, 201);
+        const grantJson = await grantRes.json();
+        assert.equal(grantJson.member.role, 'business_admin');
+        assert.equal(grantJson.member.account_slot, 'accountant');
+
+        // Granted accountant signs in via Google Auth -> gets immediate full access
+        const accMe = await fetch(`http://127.0.0.1:${port2}/api/me`, {
+          headers: { Authorization: 'Bearer token-granted-accountant' },
+        });
+        const accMeJson = await accMe.json();
+        assert.equal(accMe.status, 200);
+        assert.equal(accMeJson.user.isOwner, false);
+        const alsafaBiz = accMeJson.businesses.find((b: any) => b.id === 'alsafa-steel-workspace');
+        assert.ok(alsafaBiz);
+        assert.equal(alsafaBiz.member_role, 'business_admin');
+        assert.equal(alsafaBiz.account_slot, 'accountant');
+
+        // Accountant cannot delete/remove Master Owner
+        const allMems = await fetch(`http://127.0.0.1:${port2}/api/businesses/alsafa-steel-workspace/members`, {
+          headers: { Authorization: 'Bearer token-granted-accountant' },
+        });
+        const allMemsJson = await allMems.json();
+        const ownerMember = allMemsJson.members.find((m: any) => m.invited_email === 'azeco77@gmail.com');
+        assert.ok(ownerMember);
+        const delOwner = await fetch(
+          `http://127.0.0.1:${port2}/api/businesses/alsafa-steel-workspace/members/${ownerMember.id}`,
+          { method: 'DELETE', headers: { Authorization: 'Bearer token-granted-accountant' } }
+        );
+        assert.equal(delOwner.status, 403);
+      } finally {
+        await new Promise<void>((resolve) => srv2.close(() => resolve()));
+      }
+      return true;
+    })();
+    assert.equal(ownerMeRes, true);
+  });
 });

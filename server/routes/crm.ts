@@ -3,10 +3,20 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import * as XLSX from 'xlsx';
 import { SqlDb, createDefaultStagesForBusiness, normalizePhoneE164 } from '../db.ts';
-import { AuthRequest, Role, TokenVerifier, defaultTokenVerifier, requireBusinessAccess, upsertUserFromAuth, writeAuditLog } from '../auth.ts';
+import {
+  AuthRequest,
+  MASTER_OWNER_EMAIL,
+  Role,
+  TokenVerifier,
+  defaultTokenVerifier,
+  requireBusinessAccess,
+  upsertUserFromAuth,
+  writeAuditLog,
+} from '../auth.ts';
 import { changeLeadStatus, createLeadRecord, findDuplicateLeads } from '../services/leadService.ts';
 import { resetDemoData } from '../seedDemo.ts';
 import {
+  ALSAFA_WORKSPACE_ID,
   ATTACHED_SHEET_PATH,
   addSseClient,
   broadcastWorkspaceEvent,
@@ -29,37 +39,46 @@ export function createCrmRoutes(
   // Current user & accessible businesses
   router.get('/me', authMiddleware, (req: AuthRequest, res) => {
     const user = req.authUser!;
-    const dbUser = db.prepare('SELECT id, email, full_name, avatar_url, default_language, theme FROM users WHERE id = ?').get(user.id) as any;
+    const dbUser = db
+      .prepare('SELECT id, email, full_name, avatar_url, default_language, theme, is_platform_super_admin FROM users WHERE id = ?')
+      .get(user.id) as any;
 
     let prodBusinesses: any[] = [];
     if (!user.isDemoUser) {
       prodBusinesses = db
         .prepare(`
-          SELECT b.*, bm.role as member_role
+          SELECT b.*, bm.role as member_role, bm.account_slot as account_slot
           FROM businesses b
           JOIN business_memberships bm ON bm.business_id = b.id
-          WHERE bm.user_id = ? AND bm.status = 'active' AND b.is_demo = 0
+          WHERE bm.user_id = ? AND bm.status = 'active' AND (b.is_demo = 0 OR b.id = ?)
           ORDER BY b.created_at DESC
         `)
-        .all(user.id) as any[];
+        .all(user.id, ALSAFA_WORKSPACE_ID) as any[];
     }
 
-    const demoBusinesses = db
-      .prepare(`
-        SELECT b.*, 'business_admin' as member_role
-        FROM businesses b
-        WHERE b.is_demo = 1
-        ORDER BY b.created_at ASC
-      `)
-      .all() as any[];
+    const prodIds = new Set(prodBusinesses.map((b) => b.id));
+    const demoBusinesses = (
+      db
+        .prepare(`
+          SELECT b.*, 'business_admin' as member_role, 'manager' as account_slot
+          FROM businesses b
+          WHERE b.is_demo = 1
+          ORDER BY b.created_at ASC
+        `)
+        .all() as any[]
+    ).filter((b) => !prodIds.has(b.id) && (user.isDemoUser || user.isOwner));
 
     res.json({
-      user: dbUser || {
-        id: user.id,
-        email: user.email,
-        full_name: user.fullName,
-        default_language: 'ar',
-        theme: 'light',
+      user: {
+        ...(dbUser || {
+          id: user.id,
+          email: user.email,
+          full_name: user.fullName,
+          default_language: 'ar',
+          theme: 'light',
+        }),
+        isOwner: user.isOwner,
+        isPlatformSuperAdmin: user.isPlatformSuperAdmin,
       },
       isDemoSession: user.isDemoUser,
       businesses: prodBusinesses,
@@ -109,21 +128,23 @@ export function createCrmRoutes(
     }
 
     const tokenParam = typeof req.query.token === 'string' ? req.query.token.trim() : '';
-    if (biz.is_demo !== 1) {
-      if (!tokenParam) {
+    if (biz.is_demo !== 1 || tokenParam) {
+      if (!tokenParam && biz.is_demo !== 1) {
         return res.status(401).json({ error: 'Unauthorized SSE stream' });
       }
-      try {
-        const verified = await tokenVerifier(tokenParam);
-        const user = upsertUserFromAuth(db, verified);
-        const member = db
-          .prepare("SELECT id FROM business_memberships WHERE business_id = ? AND user_id = ? AND status = 'active'")
-          .get(businessId, user.id);
-        if (!member) {
-          return res.status(403).json({ error: 'Forbidden SSE stream' });
+      if (tokenParam) {
+        try {
+          const verified = await tokenVerifier(tokenParam);
+          const user = upsertUserFromAuth(db, verified);
+          const member = db
+            .prepare("SELECT id FROM business_memberships WHERE business_id = ? AND user_id = ? AND status = 'active'")
+            .get(businessId, user.id);
+          if (!member && !(user.isOwner && businessId === ALSAFA_WORKSPACE_ID)) {
+            return res.status(403).json({ error: 'Forbidden SSE stream' });
+          }
+        } catch {
+          return res.status(401).json({ error: 'Invalid SSE token' });
         }
-      } catch {
-        return res.status(401).json({ error: 'Invalid SSE token' });
       }
     }
 
@@ -1220,20 +1241,23 @@ export function createCrmRoutes(
     res.json({ followUp: db.prepare('SELECT * FROM follow_up_tasks WHERE id = ?').get(taskId) });
   });
 
-  // Employees & Team Management
+  // System Accounts (Manager & Accountant) + Full-Access Email Authorization
   router.get('/businesses/:businessId/members', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId } = req.params;
     const members = db
       .prepare(`
-        SELECT bm.*, u.full_name, u.avatar_url,
+        SELECT bm.*,
+               u.full_name,
+               u.avatar_url,
+               CASE WHEN LOWER(bm.invited_email) = ? THEN 1 ELSE 0 END as is_owner,
                (SELECT COUNT(*) FROM leads l WHERE l.business_id = bm.business_id AND l.assigned_to_user_id = bm.user_id) as total_leads,
                (SELECT COUNT(*) FROM leads l JOIN lead_statuses s ON s.id = l.status_id WHERE l.business_id = bm.business_id AND l.assigned_to_user_id = bm.user_id AND s.is_converted = 1) as converted_leads
         FROM business_memberships bm
         LEFT JOIN users u ON u.id = bm.user_id
         WHERE bm.business_id = ?
-        ORDER BY bm.created_at ASC
+        ORDER BY is_owner DESC, bm.created_at ASC
       `)
-      .all(businessId);
+      .all(MASTER_OWNER_EMAIL, businessId);
     res.json({ members });
   });
 
@@ -1243,24 +1267,42 @@ export function createCrmRoutes(
     requireBusinessAccess(db, ['super_admin', 'business_admin']),
     (req: AuthRequest, res) => {
       const { businessId } = req.params;
-      const { email, displayName, role } = req.body || {};
+      const { email, displayName, role, accountSlot } = req.body || {};
+      const validSlots = ['manager', 'accountant'];
       const validRoles: Role[] = ['business_admin', 'manager', 'employee'];
-      if (!email || typeof email !== 'string' || !validRoles.includes(role)) {
-        return res.status(400).json({ error: 'Valid email and role are required' });
+      const resolvedSlot: 'manager' | 'accountant' = validSlots.includes(accountSlot)
+        ? accountSlot
+        : role === 'manager'
+          ? 'manager'
+          : 'accountant';
+      // When using the 2-account model (accountSlot specified), both Manager & Accountant hold full permissions ('business_admin')
+      const resolvedRole: Role = validSlots.includes(accountSlot)
+        ? 'business_admin'
+        : validRoles.includes(role)
+          ? role
+          : 'business_admin';
+
+      if (!email || typeof email !== 'string' || !email.includes('@')) {
+        return res.status(400).json({ error: 'Valid email is required' });
       }
 
       const normalizedEmail = email.trim().toLowerCase();
+      if (normalizedEmail === MASTER_OWNER_EMAIL && !req.authUser?.isOwner) {
+        return res.status(403).json({ error: 'Only the Master Owner can modify the owner account' });
+      }
+
       const existingUser = db.prepare('SELECT id, full_name FROM users WHERE LOWER(email) = ?').get(normalizedEmail) as any;
       const now = new Date().toISOString();
       const id = crypto.randomUUID();
 
       db.prepare(`
-        INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, role, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(business_id, invited_email) DO UPDATE SET
+          account_slot = excluded.account_slot,
           role = excluded.role,
-          display_name = COALESCE(excluded.display_name, display_name),
-          status = CASE WHEN excluded.user_id IS NOT NULL THEN 'active' ELSE status END,
+          display_name = COALESCE(NULLIF(excluded.display_name, ''), display_name),
+          status = 'active',
           updated_at = excluded.updated_at
       `).run(
         id,
@@ -1268,8 +1310,9 @@ export function createCrmRoutes(
         existingUser?.id || null,
         normalizedEmail,
         displayName?.trim() || existingUser?.full_name || normalizedEmail.split('@')[0],
-        role,
-        existingUser ? 'active' : 'invited',
+        normalizedEmail === MASTER_OWNER_EMAIL ? 'manager' : resolvedSlot,
+        normalizedEmail === MASTER_OWNER_EMAIL ? 'business_admin' : resolvedRole,
+        existingUser ? 'active' : resolvedSlot ? 'invited' : 'invited',
         now,
         now
       );
@@ -1277,16 +1320,16 @@ export function createCrmRoutes(
       writeAuditLog(db, {
         businessId,
         actorUserId: req.authUser?.id,
-        action: 'employee_invited',
+        action: 'full_access_granted',
         entityType: 'membership',
         entityId: id,
-        details: { email: normalizedEmail, role },
+        details: { email: normalizedEmail, accountSlot: resolvedSlot, role: resolvedRole },
         ipAddress: req.ip,
       });
 
       const member = db
-        .prepare('SELECT * FROM business_memberships WHERE business_id = ? AND invited_email = ?')
-        .get(businessId, normalizedEmail);
+        .prepare('SELECT *, CASE WHEN LOWER(invited_email) = ? THEN 1 ELSE 0 END as is_owner FROM business_memberships WHERE business_id = ? AND LOWER(invited_email) = ?')
+        .get(MASTER_OWNER_EMAIL, businessId, normalizedEmail);
       res.status(201).json({ member });
     }
   );
@@ -1297,15 +1340,150 @@ export function createCrmRoutes(
     requireBusinessAccess(db, ['super_admin', 'business_admin']),
     (req: AuthRequest, res) => {
       const { businessId, memberId } = req.params;
-      const { role, status } = req.body || {};
+      const { role, status, accountSlot, displayName, email } = req.body || {};
+      const existingMember = db
+        .prepare('SELECT * FROM business_memberships WHERE id = ? AND business_id = ?')
+        .get(memberId, businessId) as any;
+      if (!existingMember) {
+        return res.status(404).json({ error: 'Account membership not found' });
+      }
+      const isTargetOwner = existingMember.invited_email?.toLowerCase() === MASTER_OWNER_EMAIL;
+      if (isTargetOwner && (!req.authUser?.isOwner || status === 'inactive')) {
+        return res.status(403).json({ error: 'Master Owner account cannot be deactivated or downgraded' });
+      }
+
+      const normalizedNewEmail =
+        typeof email === 'string' && email.includes('@') && !isTargetOwner ? email.trim().toLowerCase() : null;
+      const linkedUser = normalizedNewEmail
+        ? (db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(normalizedNewEmail) as any)
+        : null;
+
       db.prepare(`
         UPDATE business_memberships
         SET role = COALESCE(?, role),
+            account_slot = COALESCE(?, account_slot),
+            display_name = COALESCE(NULLIF(?, ''), display_name),
+            invited_email = COALESCE(?, invited_email),
+            user_id = CASE WHEN ? IS NOT NULL THEN ? ELSE user_id END,
             status = COALESCE(?, status),
             updated_at = ?
         WHERE id = ? AND business_id = ?
-      `).run(role || null, status || null, new Date().toISOString(), memberId, businessId);
-      res.json({ member: db.prepare('SELECT * FROM business_memberships WHERE id = ?').get(memberId) });
+      `).run(
+        isTargetOwner ? 'business_admin' : role || null,
+        isTargetOwner ? 'manager' : accountSlot || null,
+        displayName?.trim() || '',
+        normalizedNewEmail,
+        normalizedNewEmail,
+        linkedUser?.id || null,
+        isTargetOwner ? 'active' : status || null,
+        new Date().toISOString(),
+        memberId,
+        businessId
+      );
+      res.json({
+        member: db
+          .prepare('SELECT *, CASE WHEN LOWER(invited_email) = ? THEN 1 ELSE 0 END as is_owner FROM business_memberships WHERE id = ?')
+          .get(MASTER_OWNER_EMAIL, memberId),
+      });
+    }
+  );
+
+  router.delete(
+    '/businesses/:businessId/members/:memberId',
+    authMiddleware,
+    requireBusinessAccess(db, ['super_admin', 'business_admin']),
+    (req: AuthRequest, res) => {
+      const { businessId, memberId } = req.params;
+      const existingMember = db
+        .prepare('SELECT * FROM business_memberships WHERE id = ? AND business_id = ?')
+        .get(memberId, businessId) as any;
+      if (!existingMember) {
+        return res.status(404).json({ error: 'Account membership not found' });
+      }
+      if (existingMember.invited_email?.toLowerCase() === MASTER_OWNER_EMAIL) {
+        return res.status(403).json({ error: 'Cannot remove the Master Owner account' });
+      }
+
+      db.prepare('DELETE FROM business_memberships WHERE id = ? AND business_id = ?').run(memberId, businessId);
+      writeAuditLog(db, {
+        businessId,
+        actorUserId: req.authUser?.id,
+        action: 'access_revoked',
+        entityType: 'membership',
+        entityId: memberId,
+        details: { email: existingMember.invited_email },
+        ipAddress: req.ip,
+      });
+      res.json({ deleted: true });
+    }
+  );
+
+  // Sync Firebase Firestore authorized full-access accounts into workspace memberships
+  router.post(
+    '/businesses/:businessId/access-accounts/sync',
+    authMiddleware,
+    requireBusinessAccess(db, ['super_admin', 'business_admin']),
+    (req: AuthRequest, res) => {
+      const { businessId } = req.params;
+      const { accounts } = req.body || {};
+      if (!Array.isArray(accounts)) {
+        return res.status(400).json({ error: 'accounts array is required' });
+      }
+
+      const now = new Date().toISOString();
+      const upsertStmt = db.prepare(`
+        INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'business_admin', ?, ?, ?)
+        ON CONFLICT(business_id, invited_email) DO UPDATE SET
+          account_slot = excluded.account_slot,
+          role = 'business_admin',
+          display_name = COALESCE(NULLIF(excluded.display_name, ''), display_name),
+          status = CASE
+            WHEN LOWER(business_memberships.invited_email) = ? THEN 'active'
+            ELSE excluded.status
+          END,
+          user_id = COALESCE(excluded.user_id, business_memberships.user_id),
+          updated_at = excluded.updated_at
+      `);
+
+      for (const acct of accounts) {
+        if (!acct || typeof acct.email !== 'string' || !acct.email.includes('@')) continue;
+        const normalizedEmail = acct.email.trim().toLowerCase();
+        const slot: 'manager' | 'accountant' = acct.accountType === 'manager' ? 'manager' : 'accountant';
+        const existingUser = db.prepare('SELECT id, full_name FROM users WHERE LOWER(email) = ?').get(normalizedEmail) as any;
+        const status =
+          normalizedEmail === MASTER_OWNER_EMAIL
+            ? 'active'
+            : acct.status === 'inactive'
+              ? 'inactive'
+              : existingUser
+                ? 'active'
+                : 'invited';
+        upsertStmt.run(
+          crypto.randomUUID(),
+          businessId,
+          existingUser?.id || null,
+          normalizedEmail,
+          (acct.displayName || existingUser?.full_name || normalizedEmail.split('@')[0]).trim(),
+          normalizedEmail === MASTER_OWNER_EMAIL ? 'manager' : slot,
+          status,
+          now,
+          now,
+          MASTER_OWNER_EMAIL
+        );
+      }
+
+      const members = db
+        .prepare(`
+          SELECT bm.*, u.full_name, u.avatar_url,
+                 CASE WHEN LOWER(bm.invited_email) = ? THEN 1 ELSE 0 END as is_owner
+          FROM business_memberships bm
+          LEFT JOIN users u ON u.id = bm.user_id
+          WHERE bm.business_id = ?
+          ORDER BY is_owner DESC, bm.created_at ASC
+        `)
+        .all(MASTER_OWNER_EMAIL, businessId);
+      res.json({ synced: true, members });
     }
   );
 

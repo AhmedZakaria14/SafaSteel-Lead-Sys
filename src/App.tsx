@@ -26,12 +26,15 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
+  Crown,
 } from 'lucide-react';
 import { User } from 'firebase/auth';
 import {
+  AccountSlot,
   AnalyticsResponse,
   Business,
   CustomField,
+  FirestoreAuthorizedAccount,
   Language,
   NotificationItem,
   PipelineStage,
@@ -44,8 +47,11 @@ import {
   formatFirebaseAuthError,
   getGoogleWorkspaceAccessToken,
   initFirebaseAuth,
+  isMasterOwnerEmail,
   logoutFirebase,
   signInWithGoogleWorkspace,
+  subscribeFirestoreAuthorizedAccounts,
+  syncSignedInUserToFirestore,
 } from './lib/firebase';
 import { apiRequest, setApiContext } from './lib/api';
 import {
@@ -100,6 +106,8 @@ function LeadFlowAppInner() {
   const [authReady, setAuthReady] = useState(false);
   const [isDemoMode, setIsDemoMode] = useState(true);
   const [demoRole, setDemoRole] = useState<Role>('business_admin');
+  const [demoAccountSlot, setDemoAccountSlot] = useState<AccountSlot>('manager');
+  const [firestoreAccounts, setFirestoreAccounts] = useState<FirestoreAuthorizedAccount[]>([]);
 
   const [prodBusinesses, setProdBusinesses] = useState<Business[]>([]);
   const [demoBusinesses, setDemoBusinesses] = useState<Business[]>([]);
@@ -231,14 +239,59 @@ function LeadFlowAppInner() {
     return () => document.removeEventListener('mousedown', onOutside);
   }, [showNotifMenu]);
 
-  // Listen to Firebase Auth state
+  // Listen to Firebase Auth state & sync Master Owner / authorized accounts with Cloud Firestore
   useEffect(() => {
     const unsub = initFirebaseAuth((user) => {
       setFirebaseUser(user);
+      setIsDemoMode(!user);
       setAuthReady(true);
     });
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    if (!firebaseUser?.email) {
+      setFirestoreAccounts([]);
+      return;
+    }
+
+    let cancelled = false;
+    syncSignedInUserToFirestore(firebaseUser).catch((err) => {
+      console.warn('Firestore user sync warning:', err);
+    });
+
+    const unsubSnap = subscribeFirestoreAuthorizedAccounts(
+      firebaseUser.email,
+      (accounts) => {
+        if (cancelled) return;
+        setFirestoreAccounts(accounts);
+      },
+      (err) => {
+        console.warn('Firestore authorized_emails subscription warning:', err);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+      unsubSnap();
+    };
+  }, [firebaseUser?.uid, firebaseUser?.email]);
+
+  useEffect(() => {
+    if (!firebaseUser || !activeBusinessId || firestoreAccounts.length === 0) return;
+    if (!isMasterOwnerEmail(firebaseUser.email)) return;
+
+    apiRequest(`/businesses/${activeBusinessId}/access-accounts/sync`, {
+      method: 'POST',
+      body: JSON.stringify({ accounts: firestoreAccounts }),
+    })
+      .then(() => {
+        setRefreshCounter((c) => c + 1);
+      })
+      .catch(() => {
+        // ignore background sync retry
+      });
+  }, [firebaseUser?.uid, activeBusinessId, firestoreAccounts.length]);
 
   const loadSessionAndWorkspaces = async () => {
     try {
@@ -277,9 +330,9 @@ function LeadFlowAppInner() {
   const allBusinesses = [...prodBusinesses, ...demoBusinesses];
   const activeBusiness = allBusinesses.find((b) => b.id === activeBusinessId) || null;
   const effectiveRole: Role = activeBusiness
-    ? activeBusiness.is_demo
+    ? activeBusiness.is_demo && !firebaseUser
       ? demoRole
-      : activeBusiness.member_role || 'employee'
+      : activeBusiness.member_role || 'business_admin'
     : 'business_admin';
 
   const loadWorkspaceData = async (bizId: string) => {
@@ -1111,7 +1164,13 @@ function LeadFlowAppInner() {
 
             {firebaseUser ? (
               <div className="flex items-center gap-2">
-                <span className="hidden sm:inline text-xs font-medium text-slate-700 dark:text-slate-300 max-w-36 truncate">
+                {isMasterOwnerEmail(firebaseUser.email) && (
+                  <span className="hidden md:inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-900/50 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:text-amber-200">
+                    <Crown className="h-3 w-3" />
+                    <span>{isAr ? 'المالك' : 'Owner'}</span>
+                  </span>
+                )}
+                <span className="hidden sm:inline text-xs font-medium text-slate-700 dark:text-slate-300 max-w-40 truncate">
                   {firebaseUser.displayName || firebaseUser.email}
                 </span>
                 <button
@@ -1154,17 +1213,24 @@ function LeadFlowAppInner() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {activeBusiness.is_demo === 1 && (
+              {!firebaseUser && (
                 <div className="flex items-center gap-1.5">
                   <span className="text-emerald-800/80 dark:text-emerald-300/80">{t.demoRolePreview}</span>
                   <select
-                    value={demoRole}
-                    onChange={(e) => setDemoRole(e.target.value as Role)}
-                    className="rounded border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2 py-0.5 text-xs"
+                    value={demoAccountSlot}
+                    onChange={(e) => {
+                      const slot = e.target.value as AccountSlot;
+                      setDemoAccountSlot(slot);
+                      setDemoRole('business_admin');
+                    }}
+                    className="rounded border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2 py-0.5 text-xs font-medium"
                   >
-                    <option value="business_admin">{t.roleBusinessAdmin}</option>
-                    <option value="manager">{t.roleManager}</option>
-                    <option value="employee">{t.roleEmployee}</option>
+                    <option value="manager">
+                      {isAr ? 'حساب المدير (صلاحية كاملة)' : 'Manager (Full Access)'}
+                    </option>
+                    <option value="accountant">
+                      {isAr ? 'حساب المحاسب (صلاحية كاملة)' : 'Accountant (Full Access)'}
+                    </option>
                   </select>
                 </div>
               )}
@@ -1208,8 +1274,12 @@ function LeadFlowAppInner() {
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 {isAr
-                  ? 'أنشئ مساحة عمل مستقلة لنشاطك التجاري للبدء في استقبال العملاء وإدارتهم.'
-                  : 'Create an isolated business workspace to start capturing, organizing, and converting leads.'}
+                  ? firebaseUser
+                    ? `هذا الحساب (${firebaseUser.email}) غير مفوض حالياً للوصول إلى مساحة عمل الصفا ستيل. اطلب من المالك الرئيسي (azeco77@gmail.com) منحه الإذن الكامل من تبويب الحسابات والصلاحيات، أو أنشئ مساحة عمل مستقلة خاصة بك.`
+                    : 'أنشئ مساحة عمل مستقلة لنشاطك التجاري للبدء في استقبال العملاء وإدارتهم.'
+                  : firebaseUser
+                    ? `This email (${firebaseUser.email}) is not yet authorized for Al-Safa Steel. Ask the Master Owner (azeco77@gmail.com) to grant full access from Accounts & Access, or create your own workspace.`
+                    : 'Create an isolated business workspace to start capturing, organizing, and converting leads.'}
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <button
@@ -1220,16 +1290,18 @@ function LeadFlowAppInner() {
                   <Plus className="h-4 w-4" />
                   <span>{t.createWorkspace}</span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsDemoMode(true);
-                    if (demoBusinesses[0]) setActiveBusinessId(demoBusinesses[0].id);
-                  }}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium"
-                >
-                  {isAr ? 'استعراض البيانات التجريبية' : 'Explore Demo Workspaces'}
-                </button>
+                {demoBusinesses.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsDemoMode(true);
+                      if (demoBusinesses[0]) setActiveBusinessId(demoBusinesses[0].id);
+                    }}
+                    className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium"
+                  >
+                    {isAr ? 'استعراض البيانات التجريبية' : 'Explore Demo Workspaces'}
+                  </button>
+                )}
               </div>
             </div>
           ) : selectedLeadId ? (
@@ -1293,8 +1365,11 @@ function LeadFlowAppInner() {
               lang={lang}
               business={activeBusiness}
               userRole={effectiveRole}
+              firebaseUser={firebaseUser}
               members={members}
+              firestoreAccounts={firestoreAccounts}
               onRefresh={() => setRefreshCounter((c) => c + 1)}
+              onGoogleSignIn={handleGoogleSignIn}
               onNotify={notify}
             />
           ) : activeTab === 'integrations' ? (

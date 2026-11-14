@@ -10,8 +10,16 @@ service cloud.firestore {
       return request.auth != null && request.auth.token.email_verified == true;
     }
 
+    function callerEmail() {
+      return request.auth.token.email.lower();
+    }
+
     function isValidId(id) {
       return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidEmailId(id) {
+      return id is string && id.size() >= 3 && id.size() <= 254 && id.matches('^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$');
     }
 
     function incoming() {
@@ -22,78 +30,128 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'azeco77@gmail.com' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+    function isOwner() {
+      return isSignedIn() && callerEmail() == 'azeco77@gmail.com';
+    }
+
+    function isAuthorizedAccount() {
+      return isOwner() || (
+        isSignedIn()
+        && exists(/databases/$(database)/documents/authorized_emails/$(callerEmail()))
+        && get(/databases/$(database)/documents/authorized_emails/$(callerEmail())).data.status == 'active'
       );
+    }
+
+    function isValidAuthorizedList(listData) {
+      return listData is list
+        && listData.size() <= 20
+        && (listData.size() == 0 || listData[0] is string);
     }
 
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'fullName'])
-        && data.keys().hasOnly(['uid', 'email', 'fullName', 'defaultLanguage', 'theme', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'fullName', 'accountType', 'isOwner', 'defaultLanguage', 'theme', 'updatedAt'])
         && data.uid is string && data.uid == request.auth.uid && data.uid.size() <= 128
         && data.email is string && data.email.size() <= 254
         && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 160
+        && (!('accountType' in data) || (data.accountType is string && data.accountType in ['manager', 'accountant']))
+        && (!('isOwner' in data) || (data.isOwner is bool && (!data.isOwner || isOwner())))
         && (!('defaultLanguage' in data) || (data.defaultLanguage is string && data.defaultLanguage in ['ar', 'en']))
         && (!('theme' in data) || (data.theme is string && data.theme in ['light', 'dark']));
     }
 
+    function isValidAuthorizedEmail(data, emailId) {
+      return data.keys().hasAll(['email', 'accountType', 'role', 'status', 'grantedBy'])
+        && data.keys().hasOnly(['email', 'displayName', 'accountType', 'role', 'isOwner', 'status', 'grantedBy', 'updatedAt'])
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254 && data.email == emailId
+        && data.accountType is string && data.accountType in ['manager', 'accountant']
+        && data.role is string && data.role == 'full_access'
+        && data.status is string && data.status in ['active', 'inactive']
+        && data.grantedBy is string && data.grantedBy.size() >= 3 && data.grantedBy.size() <= 254
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 160))
+        && (!('isOwner' in data) || data.isOwner is bool);
+    }
+
     function isValidBusiness(data) {
-      return data.keys().hasAll(['name', 'ownerUid', 'isDemo'])
-        && data.keys().hasOnly(['name', 'industry', 'ownerUid', 'isDemo', 'updatedAt'])
+      return data.keys().hasAll(['name', 'ownerUid', 'ownerEmail', 'isDemo'])
+        && data.keys().hasOnly(['name', 'industry', 'ownerUid', 'ownerEmail', 'authorizedEmails', 'isDemo', 'updatedAt'])
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 160
-        && data.ownerUid is string && data.ownerUid == request.auth.uid && data.ownerUid.size() <= 128
+        && data.ownerUid is string && data.ownerUid.size() <= 128
+        && data.ownerEmail is string && data.ownerEmail.size() >= 3 && data.ownerEmail.size() <= 254
         && data.isDemo is bool
-        && (!('industry' in data) || (data.industry is string && data.industry.size() <= 100));
+        && (!('industry' in data) || (data.industry is string && data.industry.size() <= 160))
+        && (!('authorizedEmails' in data) || isValidAuthorizedList(data.authorizedEmails));
     }
 
     function isValidLead(data, businessId) {
       return data.keys().hasAll(['businessId', 'fullName', 'statusKey'])
-        && data.keys().hasOnly(['businessId', 'fullName', 'phone', 'email', 'statusKey', 'assignedToUid', 'updatedAt'])
+        && data.keys().hasOnly(['businessId', 'fullName', 'phone', 'email', 'statusKey', 'assignedToUid', 'authorizedEmails', 'updatedAt'])
         && data.businessId is string && data.businessId == businessId && data.businessId.size() <= 128
         && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 160
         && data.statusKey is string && data.statusKey.size() >= 1 && data.statusKey.size() <= 64
         && (!('phone' in data) || (data.phone is string && data.phone.size() <= 40))
         && (!('email' in data) || (data.email is string && data.email.size() <= 254))
-        && (!('assignedToUid' in data) || (data.assignedToUid is string && data.assignedToUid.size() <= 128));
+        && (!('assignedToUid' in data) || (data.assignedToUid is string && data.assignedToUid.size() <= 128))
+        && (!('authorizedEmails' in data) || isValidAuthorizedList(data.authorizedEmails));
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin());
+      allow get: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isOwner());
+      allow list: if isSignedIn() && (isOwner() || existing().uid == request.auth.uid);
       allow create: if isSignedIn() && isValidId(userId) && request.auth.uid == userId && isValidUserProfile(incoming());
-      allow update: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isAdmin())
+      allow update: if isSignedIn() && isValidId(userId) && (request.auth.uid == userId || isOwner())
         && isValidUserProfile(incoming())
         && incoming().uid == existing().uid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'defaultLanguage', 'theme', 'updatedAt']);
+        && incoming().email == existing().email
+        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'accountType', 'defaultLanguage', 'theme', 'updatedAt']);
       allow delete: if false;
     }
 
+    match /authorized_emails/{emailId} {
+      allow get: if isSignedIn() && isValidEmailId(emailId) && (callerEmail() == emailId || isOwner());
+      allow list: if isSignedIn() && (isOwner() || existing().email == callerEmail());
+      allow create: if isOwner() && isValidEmailId(emailId) && isValidAuthorizedEmail(incoming(), emailId);
+      allow update: if isOwner() && isValidEmailId(emailId)
+        && isValidAuthorizedEmail(incoming(), emailId)
+        && incoming().email == existing().email
+        && incoming().grantedBy == existing().grantedBy
+        && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'accountType', 'role', 'status', 'updatedAt']);
+      allow delete: if isOwner() && isValidEmailId(emailId) && emailId != 'azeco77@gmail.com';
+    }
+
     match /businesses/{businessId} {
-      allow get: if isSignedIn() && isValidId(businessId) && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (existing().ownerUid == request.auth.uid || isAdmin());
-      allow create: if isSignedIn() && isValidId(businessId) && isValidBusiness(incoming());
-      allow update: if isSignedIn() && isValidId(businessId) && (existing().ownerUid == request.auth.uid || isAdmin())
+      allow get: if isSignedIn() && isValidId(businessId) && (isOwner() || existing().ownerUid == request.auth.uid || isAuthorizedAccount());
+      allow list: if isSignedIn() && (
+        isOwner()
+        || existing().ownerUid == request.auth.uid
+        || (existing().authorizedEmails is list && existing().authorizedEmails.size() <= 20 && callerEmail() in existing().authorizedEmails)
+      );
+      allow create: if isSignedIn() && isValidId(businessId) && isValidBusiness(incoming()) && (isOwner() || isAuthorizedAccount());
+      allow update: if isSignedIn() && isValidId(businessId)
+        && (isOwner() || existing().ownerUid == request.auth.uid || isAuthorizedAccount())
         && isValidBusiness(incoming())
         && incoming().ownerUid == existing().ownerUid
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'industry', 'updatedAt']);
-      allow delete: if isSignedIn() && isValidId(businessId) && (existing().ownerUid == request.auth.uid || isAdmin());
+        && incoming().ownerEmail == existing().ownerEmail
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'industry', 'authorizedEmails', 'updatedAt']);
+      allow delete: if isOwner() && isValidId(businessId);
 
       match /leads/{leadId} {
         allow get: if isSignedIn() && isValidId(businessId) && isValidId(leadId)
-          && (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid || isAdmin());
-        allow list: if isSignedIn() && isValidId(businessId)
-          && (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid || isAdmin());
+          && (isOwner() || isAuthorizedAccount() || get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid);
+        allow list: if isSignedIn() && isValidId(businessId) && (
+          isOwner()
+          || (existing().authorizedEmails is list && existing().authorizedEmails.size() <= 20 && callerEmail() in existing().authorizedEmails)
+        );
         allow create: if isSignedIn() && isValidId(businessId) && isValidId(leadId)
           && isValidLead(incoming(), businessId)
-          && (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid || isAdmin());
+          && (isOwner() || isAuthorizedAccount() || get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid);
         allow update: if isSignedIn() && isValidId(businessId) && isValidId(leadId)
           && isValidLead(incoming(), businessId)
           && incoming().businessId == existing().businessId
-          && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'phone', 'email', 'statusKey', 'assignedToUid', 'updatedAt'])
-          && (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid || isAdmin());
+          && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'phone', 'email', 'statusKey', 'assignedToUid', 'authorizedEmails', 'updatedAt'])
+          && (isOwner() || isAuthorizedAccount() || get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid);
         allow delete: if isSignedIn() && isValidId(businessId) && isValidId(leadId)
-          && (get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid || isAdmin());
+          && (isOwner() || isAuthorizedAccount() || get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerUid == request.auth.uid);
       }
     }
   }

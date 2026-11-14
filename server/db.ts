@@ -74,6 +74,7 @@ function initSchema(db: SqlDb) {
       user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
       invited_email TEXT NOT NULL,
       display_name TEXT,
+      account_slot TEXT NOT NULL DEFAULT 'accountant' CHECK (account_slot IN ('manager', 'accountant')),
       role TEXT NOT NULL CHECK (role IN ('super_admin', 'business_admin', 'manager', 'employee')),
       status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'invited', 'inactive')),
       created_at TEXT NOT NULL,
@@ -266,6 +267,11 @@ function initSchema(db: SqlDb) {
       created_at TEXT NOT NULL
     );
   `);
+
+  const memberCols = db.prepare('PRAGMA table_info(business_memberships)').all() as Array<{ name: string }>;
+  if (!memberCols.some((c) => c.name === 'account_slot')) {
+    db.exec("ALTER TABLE business_memberships ADD COLUMN account_slot TEXT NOT NULL DEFAULT 'accountant';");
+  }
 }
 
 export const DEFAULT_PIPELINE_STAGES = [

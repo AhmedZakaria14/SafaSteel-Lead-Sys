@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { SqlDb, createDefaultStagesForBusiness } from './db.ts';
+import { MASTER_OWNER_EMAIL } from './auth.ts';
 import {
   ALSAFA_WORKSPACE_ID,
   ATTACHED_SHEET_PATH,
@@ -8,12 +9,96 @@ import {
 } from './services/sheetSyncService.ts';
 
 const LEGACY_FAKE_BIZ_IDS = ['demo-biz-atlas', 'demo-biz-careline', 'demo-biz-horizon'];
-
-const WORKSPACE_USERS = [
-  { id: 'demo-user-admin', email: 'admin@alsafasteel.local', full_name: 'إدارة الصفا ستيل / Al-Safa Admin' },
-  { id: 'demo-user-sales1', email: 'sales1@alsafasteel.local', full_name: 'فريق المبيعات 1 / Sales Rep 1' },
-  { id: 'demo-user-sales2', email: 'sales2@alsafasteel.local', full_name: 'فريق المبيعات 2 / Sales Rep 2' },
+const LEGACY_DEMO_USER_EMAILS = [
+  'admin@alsafasteel.local',
+  'sales1@alsafasteel.local',
+  'sales2@alsafasteel.local',
 ];
+
+const SYSTEM_ACCOUNTS = [
+  {
+    id: 'alsafa-owner-manager',
+    email: MASTER_OWNER_EMAIL,
+    full_name: 'حساب المدير (المالك الرئيسي) | Manager (Owner)',
+    account_slot: 'manager' as const,
+    role: 'business_admin' as const,
+    is_platform_super_admin: 1,
+  },
+  {
+    id: 'alsafa-accountant',
+    email: 'accountant@alsafasteel.local',
+    full_name: 'حساب المحاسب (صلاحية كاملة) | Accountant (Full Access)',
+    account_slot: 'accountant' as const,
+    role: 'business_admin' as const,
+    is_platform_super_admin: 0,
+  },
+];
+
+function ensureTwoSystemAccounts(db: SqlDb) {
+  const now = new Date().toISOString();
+
+  // Remove legacy 3-tier demo accounts from Al-Safa Steel if present in an older SQLite file
+  for (const legacyEmail of LEGACY_DEMO_USER_EMAILS) {
+    db.prepare('DELETE FROM business_memberships WHERE business_id = ? AND LOWER(invited_email) = ?').run(
+      ALSAFA_WORKSPACE_ID,
+      legacyEmail
+    );
+  }
+
+  for (const acct of SYSTEM_ACCOUNTS) {
+    const existingByEmail = db
+      .prepare('SELECT id, firebase_uid FROM users WHERE LOWER(email) = ?')
+      .get(acct.email.toLowerCase()) as { id: string; firebase_uid: string | null } | undefined;
+
+    let userId = existingByEmail?.id || acct.id;
+    if (!existingByEmail) {
+      const existingById = db.prepare('SELECT id FROM users WHERE id = ?').get(acct.id);
+      if (!existingById) {
+        db.prepare(`
+          INSERT INTO users (id, firebase_uid, email, full_name, default_language, theme, is_platform_super_admin, created_at, updated_at)
+          VALUES (?, ?, ?, ?, 'ar', 'light', ?, ?, ?)
+        `).run(userId, `seed-uid-${acct.id}`, acct.email, acct.full_name, acct.is_platform_super_admin, now, now);
+      }
+    } else if (acct.is_platform_super_admin === 1) {
+      db.prepare('UPDATE users SET is_platform_super_admin = 1, updated_at = ? WHERE id = ?').run(now, userId);
+    }
+
+    const existingMembership = db
+      .prepare('SELECT id, user_id, role, status, account_slot FROM business_memberships WHERE business_id = ? AND LOWER(invited_email) = ?')
+      .get(ALSAFA_WORKSPACE_ID, acct.email.toLowerCase()) as any;
+
+    if (!existingMembership) {
+      // Only seed the default placeholder accountant if no custom accountant account already exists in account_slot = 'accountant'
+      if (acct.account_slot === 'accountant') {
+        const hasAnyAccountant = db
+          .prepare("SELECT id FROM business_memberships WHERE business_id = ? AND account_slot = 'accountant'")
+          .get(ALSAFA_WORKSPACE_ID);
+        if (hasAnyAccountant) continue;
+      }
+
+      db.prepare(`
+        INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+      `).run(
+        crypto.randomUUID(),
+        ALSAFA_WORKSPACE_ID,
+        userId,
+        acct.email,
+        acct.full_name,
+        acct.account_slot,
+        acct.role,
+        now,
+        now
+      );
+    } else if (acct.email === MASTER_OWNER_EMAIL) {
+      db.prepare(`
+        UPDATE business_memberships
+        SET user_id = COALESCE(user_id, ?), account_slot = 'manager', role = 'business_admin', status = 'active', updated_at = ?
+        WHERE id = ?
+      `).run(userId, now, existingMembership.id);
+    }
+  }
+}
 
 export function ensureDemoData(db: SqlDb) {
   // Purge legacy fake businesses if present in an existing persisted DB
@@ -28,6 +113,7 @@ export function ensureDemoData(db: SqlDb) {
   if (!existing) {
     seedAlSafaWorkspace(db);
   } else {
+    ensureTwoSystemAccounts(db);
     // Ensure any newly appended rows in the attached sheet are synced on startup
     if (fs.existsSync(ATTACHED_SHEET_PATH)) {
       syncAttachedSheetToWorkspace(db, ALSAFA_WORKSPACE_ID, ATTACHED_SHEET_PATH, {
@@ -52,18 +138,9 @@ export function resetDemoData(db: SqlDb) {
 function seedAlSafaWorkspace(db: SqlDb) {
   const now = new Date().toISOString();
 
-  const upsertUser = db.prepare(`
-    INSERT INTO users (id, firebase_uid, email, full_name, default_language, theme, is_platform_super_admin, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'ar', 'light', 0, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET full_name = excluded.full_name, updated_at = excluded.updated_at
-  `);
-  for (const u of WORKSPACE_USERS) {
-    upsertUser.run(u.id, `demo-uid-${u.id}`, u.email, u.full_name, now, now);
-  }
-
   db.prepare(`
     INSERT INTO businesses (id, name, industry, logo_url, phone, email, website, timezone, default_country_code, is_demo, round_robin_enabled, round_robin_index, created_by, created_at, updated_at)
-    VALUES (?, ?, ?, NULL, NULL, NULL, NULL, 'Africa/Cairo', '+20', 1, 0, 0, 'demo-user-admin', ?, ?)
+    VALUES (?, ?, ?, NULL, NULL, NULL, NULL, 'Africa/Cairo', '+20', 1, 0, 0, NULL, ?, ?)
   `).run(
     ALSAFA_WORKSPACE_ID,
     'الصفا ستيل | Al-Safa Steel',
@@ -72,43 +149,8 @@ function seedAlSafaWorkspace(db: SqlDb) {
     now
   );
 
+  ensureTwoSystemAccounts(db);
   createDefaultStagesForBusiness(db, ALSAFA_WORKSPACE_ID);
-
-  // Team memberships
-  const insertMember = db.prepare(`
-    INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, role, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)
-  `);
-  insertMember.run(
-    crypto.randomUUID(),
-    ALSAFA_WORKSPACE_ID,
-    'demo-user-admin',
-    'admin@alsafasteel.local',
-    'إدارة الصفا ستيل / Al-Safa Admin',
-    'business_admin',
-    now,
-    now
-  );
-  insertMember.run(
-    crypto.randomUUID(),
-    ALSAFA_WORKSPACE_ID,
-    'demo-user-sales1',
-    'sales1@alsafasteel.local',
-    'فريق المبيعات 1 / Sales Rep 1',
-    'manager',
-    now,
-    now
-  );
-  insertMember.run(
-    crypto.randomUUID(),
-    ALSAFA_WORKSPACE_ID,
-    'demo-user-sales2',
-    'sales2@alsafasteel.local',
-    'فريق المبيعات 2 / Sales Rep 2',
-    'employee',
-    now,
-    now
-  );
 
   // Custom fields matching the real sheet columns
   const customFields = [

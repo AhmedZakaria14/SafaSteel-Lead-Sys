@@ -1,6 +1,18 @@
 export type Language = 'ar' | 'en';
 export type ThemeMode = 'light' | 'dark';
 export type Role = 'super_admin' | 'business_admin' | 'manager' | 'employee';
+export type AccountSlot = 'manager' | 'accountant';
+
+export interface FirestoreAuthorizedAccount {
+  email: string;
+  displayName?: string;
+  accountType: AccountSlot;
+  role: 'full_access';
+  isOwner?: boolean;
+  status: 'active' | 'inactive';
+  grantedBy: string;
+  updatedAt?: string;
+}
 
 export interface UserProfile {
   id: string;
@@ -9,6 +21,7 @@ export interface UserProfile {
   avatar_url?: string | null;
   default_language: Language;
   theme: ThemeMode;
+  isOwner?: boolean;
 }
 
 export interface Business {
@@ -24,6 +37,7 @@ export interface Business {
   is_demo: number;
   round_robin_enabled: number;
   member_role: Role;
+  account_slot?: AccountSlot;
   created_at: string;
 }
 
@@ -128,6 +142,8 @@ export interface TeamMember {
   invited_email: string;
   display_name?: string | null;
   full_name?: string | null;
+  account_slot?: AccountSlot;
+  is_owner?: number | boolean;
   role: Role;
   status: 'active' | 'invited' | 'inactive';
   total_leads?: number;

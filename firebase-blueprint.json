@@ -2,16 +2,33 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Authenticated platform user profile",
+      "description": "Authenticated platform user profile recognized via Google Auth",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
         "email": { "type": "string", "format": "email", "maxLength": 254 },
         "fullName": { "type": "string", "maxLength": 160 },
+        "accountType": { "type": "string", "enum": ["manager", "accountant"] },
+        "isOwner": { "type": "boolean" },
         "defaultLanguage": { "type": "string", "enum": ["ar", "en"] },
         "theme": { "type": "string", "enum": ["light", "dark"] }
       },
       "required": ["uid", "email", "fullName"]
+    },
+    "AuthorizedEmail": {
+      "title": "AuthorizedEmail",
+      "description": "Full-access account authorization granted by the Master Owner (azeco77@gmail.com)",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string", "format": "email", "maxLength": 254 },
+        "displayName": { "type": "string", "maxLength": 160 },
+        "accountType": { "type": "string", "enum": ["manager", "accountant"] },
+        "role": { "type": "string", "enum": ["full_access"] },
+        "isOwner": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["active", "inactive"] },
+        "grantedBy": { "type": "string", "format": "email", "maxLength": 254 }
+      },
+      "required": ["email", "accountType", "role", "status", "grantedBy"]
     },
     "Business": {
       "title": "Business",
@@ -19,11 +36,12 @@
       "type": "object",
       "properties": {
         "name": { "type": "string", "maxLength": 160 },
-        "industry": { "type": "string", "maxLength": 100 },
+        "industry": { "type": "string", "maxLength": 160 },
         "ownerUid": { "type": "string", "maxLength": 128 },
+        "ownerEmail": { "type": "string", "format": "email", "maxLength": 254 },
         "isDemo": { "type": "boolean" }
       },
-      "required": ["name", "ownerUid"]
+      "required": ["name", "ownerUid", "ownerEmail"]
     },
     "Lead": {
       "title": "Lead",
@@ -45,9 +63,13 @@
       "schema": { "$ref": "#/entities/UserProfile" },
       "description": "User profiles isolated by UID"
     },
+    "/authorized_emails/{emailId}": {
+      "schema": { "$ref": "#/entities/AuthorizedEmail" },
+      "description": "Full-access Manager & Accountant emails authorized by Master Owner azeco77@gmail.com"
+    },
     "/businesses/{businessId}": {
       "schema": { "$ref": "#/entities/Business" },
-      "description": "Business workspaces isolated by membership"
+      "description": "Business workspaces isolated by owner and authorized full-access accounts"
     },
     "/businesses/{businessId}/leads/{leadId}": {
       "schema": { "$ref": "#/entities/Lead" },
