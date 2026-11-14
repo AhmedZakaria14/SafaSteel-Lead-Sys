@@ -1,7 +1,4 @@
 import { Request, Response, NextFunction } from 'express';
-import { initializeApp, getApps } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,14 +18,18 @@ function loadFirebaseConfig(): { projectId?: string; firestoreDatabaseId?: strin
 
 const firebaseConfig = loadFirebaseConfig();
 
-try {
-  if (!getApps().length && firebaseConfig?.projectId && firebaseConfig.projectId !== 'remixed-project-id') {
+async function ensureFirebaseAdminApp() {
+  if (!firebaseConfig?.projectId || firebaseConfig.projectId === 'remixed-project-id') {
+    return null;
+  }
+  const fbAppPkg = 'firebase-admin/app';
+  const { initializeApp, getApps } = await import(/* @vite-ignore */ fbAppPkg);
+  if (!getApps().length) {
     initializeApp({
       projectId: firebaseConfig.projectId,
     });
   }
-} catch {
-  // Graceful skip if Firebase Admin init fails in serverless environment
+  return getApps()[0] || null;
 }
 
 export const MASTER_OWNER_EMAIL = 'azeco77@gmail.com';
@@ -110,13 +111,17 @@ export function verifySessionToken(token: string): SessionTokenPayload | null {
 
 export async function syncSystemAccountsToFirestore(db: SqlDb): Promise<void> {
   const projectId = firebaseConfig?.projectId;
-  const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-  if (!projectId || !dbId || !getApps().length) return;
+  const dbId = firebaseConfig?.firestoreDatabaseId;
+  if (!projectId || !dbId) return;
   // Only attempt Admin Firestore sync when GCP credentials exist in the runtime environment
   if (!process.env.GOOGLE_APPLICATION_CREDENTIALS && !process.env.K_SERVICE) return;
 
   try {
-    const adminFs = getAdminFirestore(getApps()[0], dbId);
+    const app = await ensureFirebaseAdminApp();
+    if (!app) return;
+    const fbFirestorePkg = 'firebase-admin/firestore';
+    const { getFirestore: getAdminFirestore } = await import(/* @vite-ignore */ fbFirestorePkg);
+    const adminFs = getAdminFirestore(app, dbId);
     const rows = db
       .prepare(`
         SELECT u.id, u.username, u.email, u.full_name, u.is_platform_super_admin,
@@ -182,7 +187,13 @@ export type TokenVerifier = (token: string) => Promise<{
 }>;
 
 export const defaultTokenVerifier: TokenVerifier = async (token: string) => {
-  const adminAuth = getAuth();
+  const app = await ensureFirebaseAdminApp();
+  if (!app) {
+    throw new Error('Firebase Admin is not configured in this environment');
+  }
+  const fbAuthPkg = 'firebase-admin/auth';
+  const { getAuth } = await import(/* @vite-ignore */ fbAuthPkg);
+  const adminAuth = getAuth(app);
   const decoded = await adminAuth.verifyIdToken(token);
   if (!decoded.email) {
     throw new Error('Verified token missing email address');

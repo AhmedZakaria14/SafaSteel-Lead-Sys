@@ -41,7 +41,7 @@ import {
   UserProfile,
 } from './types/crm';
 import { getT } from './i18n/translations';
-import { ALSAFA_WORKSPACE_ID, DEFAULT_ADMIN_USERNAME, MASTER_OWNER_EMAIL } from './lib/firebase';
+import { ALSAFA_WORKSPACE_ID, DEFAULT_ADMIN_USERNAME, MASTER_OWNER_EMAIL } from './lib/constants';
 import { apiRequest, getAuthToken, onUnauthorized, setAuthToken } from './lib/api';
 import {
   BrowserNotificationSupport,

@@ -2,7 +2,7 @@
   "version": 2,
   "functions": {
     "api/index.ts": {
-      "includeFiles": "{public/assets/aistudio/**,firebase-applet-config.json,server/**}"
+      "includeFiles": "{public/assets/aistudio/**,firebase-applet-config.json}"
     }
   },
   "rewrites": [

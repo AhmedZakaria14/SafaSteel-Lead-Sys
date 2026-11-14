@@ -20,7 +20,7 @@ import {
 } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest } from '../../lib/api';
-import { DEFAULT_ADMIN_USERNAME, MASTER_OWNER_EMAIL } from '../../lib/firebase';
+import { DEFAULT_ADMIN_USERNAME, MASTER_OWNER_EMAIL } from '../../lib/constants';
 
 interface TeamViewProps {
   lang: Language;

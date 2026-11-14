@@ -1,7 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { SqlDb, normalizePhoneE164 } from '../db.ts';
 import { addSseClient, removeSseClient, broadcastWorkspaceEvent } from './realtimeService.ts';
 import { createAndBroadcastNotification } from './notificationService.ts';
@@ -9,13 +8,9 @@ import { createAndBroadcastNotification } from './notificationService.ts';
 export { addSseClient, removeSseClient, broadcastWorkspaceEvent };
 
 export const ALSAFA_WORKSPACE_ID = 'alsafa-steel-workspace';
-const __sheetServiceDir =
-  typeof import.meta !== 'undefined' && Boolean(import.meta.url)
-    ? path.dirname(fileURLToPath(import.meta.url))
-    : path.join(process.cwd(), 'server', 'services');
 const CANDIDATE_SHEET_PATHS = [
   path.join(process.cwd(), 'public', 'assets', 'aistudio', '________________________________e27d1ae1'),
-  path.resolve(__sheetServiceDir, '../../public/assets/aistudio/________________________________e27d1ae1'),
+  path.resolve('public', 'assets', 'aistudio', '________________________________e27d1ae1'),
 ];
 export const ATTACHED_SHEET_PATH =
   CANDIDATE_SHEET_PATHS.find((p) => fs.existsSync(p)) || CANDIDATE_SHEET_PATHS[0];

@@ -1,32 +1,30 @@
 import { initializeApp, getApps } from 'firebase/app';
-import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
+import { Firestore, getFirestore, initializeFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
-export const MASTER_OWNER_EMAIL = 'azeco77@gmail.com';
-export const DEFAULT_ADMIN_USERNAME = 'admin';
-export const ALSAFA_WORKSPACE_ID = 'alsafa-steel-workspace';
+export {
+  ALSAFA_WORKSPACE_ID,
+  DEFAULT_ADMIN_USERNAME,
+  MASTER_OWNER_EMAIL,
+  isMasterOwnerEmail,
+} from './constants';
 
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
-export const firestoreDb = firebaseConfig.firestoreDatabaseId
-  ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
-  : getFirestore(app);
+let cachedFirestoreDb: Firestore | null = null;
 
-export function isMasterOwnerEmail(email?: string | null): boolean {
-  return Boolean(email && email.trim().toLowerCase() === MASTER_OWNER_EMAIL);
-}
-
-// Validate live connection to Firestore on boot
-async function testConnection() {
+export function getFirestoreDb(): Firestore {
+  if (cachedFirestoreDb) return cachedFirestoreDb;
+  const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+  const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
   try {
-    await getDocFromServer(doc(firestoreDb, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.error('Please check your Firebase configuration.');
-    }
+    cachedFirestoreDb = initializeFirestore(
+      app,
+      { experimentalForceLongPolling: true },
+      dbId
+    );
+  } catch {
+    cachedFirestoreDb = getFirestore(app, dbId);
   }
-}
-if (typeof window !== 'undefined') {
-  void testConnection();
+  return cachedFirestoreDb;
 }
 
 export enum OperationType {

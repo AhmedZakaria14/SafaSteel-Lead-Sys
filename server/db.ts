@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+// @ts-ignore - subpath export without bundled .d.ts
+import sqlJsModule from 'sql.js/dist/sql-wasm-inline.js';
 
 export interface SqlRunResult {
   changes: number | bigint;
@@ -146,9 +148,7 @@ export async function ensureDbReady(): Promise<void> {
   if (cachedSqlJs) return;
   if (!sqlJsLoadPromise) {
     sqlJsLoadPromise = (async () => {
-      // @ts-ignore - subpath export without bundled .d.ts
-      const mod: any = await import('sql.js/dist/sql-wasm-inline.js');
-      const initSqlJs = mod.default || mod;
+      const initSqlJs = (sqlJsModule as any)?.default || sqlJsModule;
       cachedSqlJs = await initSqlJs();
       return cachedSqlJs;
     })();
