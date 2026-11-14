@@ -422,5 +422,35 @@ describe('LeadFlow CRM Acceptance Tests', () => {
     );
     assert.equal(delOwner.status, 403);
   });
+
+  it('19. Routes Vercel api/index.ts rewritten __path URLs directly to /api/auth/login and analytics without 404', async () => {
+    const { default: vercelHandler } = await import('../api/index.ts');
+    const srv = await new Promise<http.Server>((resolve) => {
+      const s = http.createServer((req, res) => vercelHandler(req as any, res as any));
+      s.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const port = (srv.address() as any).port;
+    try {
+      const loginRes = await fetch(`http://127.0.0.1:${port}/api/index?__path=auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'SafaSteels2026' }),
+      });
+      assert.equal(loginRes.status, 200);
+      const loginJson = await loginRes.json();
+      assert.ok(loginJson.token && loginJson.token.startsWith('lf1.'));
+
+      const analyticsRes = await fetch(
+        `http://127.0.0.1:${port}/api/index?__path=businesses/alsafa-steel-workspace/analytics`,
+        { headers: { Authorization: `Bearer ${loginJson.token}` } }
+      );
+      assert.equal(analyticsRes.status, 200);
+      const analyticsJson = await analyticsRes.json();
+      assert.ok(analyticsJson.summary.total > 200);
+    } finally {
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
+    }
+  });
 });
+
 

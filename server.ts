@@ -49,6 +49,10 @@ export function buildApp(options?: { db?: SqlDb; tokenVerifier?: TokenVerifier }
   app.use('/api', createMetaRoutes(db, authMiddleware));
   app.use('/api', createGoogleRoutes(db, authMiddleware));
 
+  app.use('/api', (req, res) => {
+    res.status(404).json({ error: `API endpoint not found: ${req.method} ${req.originalUrl}` });
+  });
+
   // Global sanitized JSON error handler
   app.use((err: any, _req: any, res: any, _next: any) => {
     console.error('Unhandled server error:', err);
