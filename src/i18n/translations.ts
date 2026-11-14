@@ -2,7 +2,7 @@ import { Language } from '../types/crm';
 
 export const translations = {
   ar: {
-    brandName: 'LeadFlow CRM',
+    brandName: 'الصفا ستيل',
     navDashboard: 'لوحة التحكم',
     navLeads: 'العملاء المحتملون',
     navPipeline: 'مسار المبيعات',
@@ -143,7 +143,7 @@ export const translations = {
     noNotifications: 'لا توجد إشعارات جديدة',
   },
   en: {
-    brandName: 'LeadFlow CRM',
+    brandName: 'Al-Safa Steel',
     navDashboard: 'Dashboard',
     navLeads: 'Leads',
     navPipeline: 'Sales Pipeline',
@@ -163,7 +163,7 @@ export const translations = {
     signOut: 'Sign Out',
     usernameLabel: 'Username',
     passwordLabel: 'Password',
-    loginTitle: 'Sign In to LeadFlow CRM',
+    loginTitle: 'Sign In to Al-Safa Steel',
     loginSubtitle: 'Enter your username and password to access Al-Safa Steel dashboard and synced leads.',
     demoRolePreview: 'Active Account:',
     roleBusinessAdmin: 'Manager (Full Access)',

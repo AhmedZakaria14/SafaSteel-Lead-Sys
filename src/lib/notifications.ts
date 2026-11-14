@@ -73,6 +73,8 @@ export async function showBrowserPushNotification(params: {
     if (reg && 'showNotification' in reg) {
       await reg.showNotification(params.title, {
         body: params.body,
+        icon: '/favicon.png',
+        badge: '/favicon.png',
         tag: params.id,
         silent: false,
         data,
@@ -86,6 +88,7 @@ export async function showBrowserPushNotification(params: {
   try {
     const notif = new window.Notification(params.title, {
       body: params.body,
+      icon: '/favicon.png',
       tag: params.id,
       silent: false,
       data,

@@ -13,13 +13,15 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: 'LeadFlow CRM', body: event.data ? event.data.text() : '' };
+    payload = { title: 'Al-Safa Steel', body: event.data ? event.data.text() : '' };
   }
 
-  const title = payload.title || 'LeadFlow CRM';
+  const title = payload.title || 'Al-Safa Steel';
   const options = {
     body: payload.body || '',
-    tag: payload.tag || payload.id || 'leadflow-notification',
+    icon: '/favicon.png',
+    badge: '/favicon.png',
+    tag: payload.tag || payload.id || 'alsafa-notification',
     silent: false,
     renotify: true,
     data: {

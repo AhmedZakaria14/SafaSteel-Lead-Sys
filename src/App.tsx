@@ -662,7 +662,7 @@ function LeadFlowAppInner() {
       );
       showBrowserPushNotification({
         id: `push-enabled-${Date.now()}`,
-        title: isAr ? 'إشعارات LeadFlow CRM مفعلة' : 'LeadFlow CRM Push Enabled',
+        title: isAr ? 'إشعارات الصفا ستيل مفعلة' : 'Al-Safa Steel Push Enabled',
         body: isAr
           ? 'سيتم إرسال تنبيه فوري بصوت مميز عند وصول أي عميل جديد أو تنفيذ إجراء.'
           : 'You will now receive instant audio & push alerts for new leads and updates.',
@@ -754,16 +754,24 @@ function LeadFlowAppInner() {
           sidebarCollapsed ? 'w-16' : 'w-64'
         }`}
       >
-        <div className="h-16 px-4 flex items-center justify-between border-b border-slate-200 dark:border-slate-800">
-          {!sidebarCollapsed && (
-            <span className="text-base font-bold tracking-tight text-[#0F1E3D] dark:text-white whitespace-nowrap">
-              {t.brandName}
-            </span>
+        <div className="h-16 px-3.5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 gap-2">
+          {!sidebarCollapsed ? (
+            <img
+              src="/alsafa-logo.png"
+              alt="Al-Safa Steel"
+              className="h-11 w-auto max-w-[168px] object-contain select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+            />
+          ) : (
+            <img
+              src="/favicon.png"
+              alt="Al-Safa Steel"
+              className="h-8 w-8 object-contain mx-auto select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+            />
           )}
           <button
             type="button"
             onClick={() => setSidebarCollapsed((c) => !c)}
-            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
             aria-label="Toggle sidebar"
           >
             <Menu className="h-4 w-4" />
@@ -857,9 +865,13 @@ function LeadFlowAppInner() {
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 md:hidden flex">
           <div className="w-[84vw] max-w-xs bg-white dark:bg-slate-900 border-e border-slate-200 dark:border-slate-800 h-full flex flex-col pt-safe pb-safe crm-drawer-enter shadow-2xl">
-            <div className="px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="font-bold text-sm text-[#0F1E3D] dark:text-white truncate">{t.brandName}</div>
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+              <div className="min-w-0 flex flex-col gap-0.5">
+                <img
+                  src="/alsafa-logo.png"
+                  alt="Al-Safa Steel"
+                  className="h-11 w-auto max-w-[160px] object-contain object-start select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+                />
                 <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono" dir="ltr">
                   {authUser.username || authUser.full_name}
                 </div>
@@ -999,9 +1011,22 @@ function LeadFlowAppInner() {
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
-              {activeBusiness ? activeBusiness.name : t.brandName}
-            </div>
+            <img
+              src="/alsafa-logo.png"
+              alt="Al-Safa Steel"
+              className="md:hidden h-9 w-auto max-w-[118px] object-contain shrink-0 select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+            />
+            {activeBusiness ? (
+              <div className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                {activeBusiness.name}
+              </div>
+            ) : (
+              <img
+                src="/alsafa-logo.png"
+                alt="Al-Safa Steel"
+                className="hidden md:block h-9 w-auto object-contain select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+              />
+            )}
           </div>
 
           {/* Global Live Customer Search in Desktop Topbar */}
@@ -1336,9 +1361,13 @@ function LeadFlowAppInner() {
           <Suspense fallback={<ViewSkeleton />}>
             {!activeBusiness ? (
               <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 sm:p-12 text-center max-w-lg mx-auto mt-6 sm:mt-10">
-                <Building2 className="h-10 w-10 mx-auto text-[#0F1E3D] dark:text-blue-400" />
+                <img
+                  src="/alsafa-logo.png"
+                  alt="Al-Safa Steel"
+                  className="h-20 w-auto mx-auto object-contain select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+                />
                 <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-100">
-                  {isAr ? 'مرحباً بك في LeadFlow CRM' : 'Welcome to LeadFlow CRM'}
+                  {isAr ? 'مرحباً بك في نظام إدارة العملاء' : 'Welcome to Al-Safa Steel CRM'}
                 </h2>
                 <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                   {isAr

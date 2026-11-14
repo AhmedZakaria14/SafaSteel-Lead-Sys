@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Eye, EyeOff, KeyRound, Languages, Lock, Moon, ShieldCheck, Sun, User } from 'lucide-react';
+import { Eye, EyeOff, Languages, Lock, Moon, ShieldCheck, Sun, User } from 'lucide-react';
 import { Business, Language, ThemeMode, UserProfile } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest, setAuthToken } from '../../lib/api';
@@ -98,21 +98,17 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
 
       <div className="max-w-md w-full mx-auto my-auto py-4 sm:py-8">
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl shadow-slate-200/50 dark:shadow-none overflow-hidden crm-animate-enter">
-          <div className="bg-[#0F1E3D] px-5 sm:px-6 py-5 sm:py-6 text-white">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xs font-semibold uppercase tracking-wider text-blue-300">
-                  {t.brandName}
-                </div>
-                <h1 className="mt-1 text-lg sm:text-xl font-bold tracking-tight">
-                  {isAr ? 'الصفا ستيل | إدارة العملاء' : 'Al-Safa Steel CRM'}
-                </h1>
-              </div>
-              <div className="h-11 w-11 rounded-xl bg-white/10 border border-white/15 flex items-center justify-center shrink-0">
-                <KeyRound className="h-5 w-5 text-blue-200" />
-              </div>
+          <div className="bg-gradient-to-b from-slate-50/90 to-white dark:from-slate-900 dark:to-slate-900 px-5 sm:px-6 py-5 sm:py-6 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex flex-col items-center text-center">
+              <img
+                src="/alsafa-logo.png"
+                alt="Al-Safa Steel"
+                className="h-20 sm:h-24 w-auto object-contain select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+              />
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-xs">
+                {t.loginSubtitle}
+              </p>
             </div>
-            <p className="mt-2.5 text-xs text-slate-300 leading-relaxed">{t.loginSubtitle}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-4">
@@ -202,7 +198,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
       </div>
 
       <div className="text-center text-[11px] text-slate-400 pb-1">
-        {isAr ? 'الصفا ستيل — نظام إدارة العملاء والمبيعات' : 'Al-Safa Steel — LeadFlow CRM'}
+        {isAr ? 'الصفا ستيل — نظام إدارة العملاء والمبيعات' : 'Al-Safa Steel — CRM Platform'}
       </div>
     </div>
   );
