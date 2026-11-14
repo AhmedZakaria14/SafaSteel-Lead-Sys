@@ -820,6 +820,10 @@ function LeadFlowAppInner() {
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id && !selectedLeadId;
+            const unreadLeadsBadge =
+              item.id === 'leads' && typeof analytics?.summary?.unreadLeads === 'number'
+                ? analytics.summary.unreadLeads
+                : 0;
             return (
               <button
                 key={item.id}
@@ -828,14 +832,21 @@ function LeadFlowAppInner() {
                   setActiveTab(item.id);
                   setSelectedLeadId(null);
                 }}
-                className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-xs font-medium transition-colors whitespace-nowrap ${
+                className={`w-full flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-xs font-medium transition-colors whitespace-nowrap ${
                   active
                     ? 'bg-[#0F1E3D] text-white dark:bg-blue-600'
                     : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-100'
                 }`}
               >
-                <Icon className="h-4 w-4 shrink-0" />
-                {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                <span className="flex items-center gap-3 min-w-0">
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+                </span>
+                {!sidebarCollapsed && unreadLeadsBadge > 0 && (
+                  <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white tabular-nums shrink-0">
+                    {unreadLeadsBadge > 99 ? '99+' : unreadLeadsBadge}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -892,6 +903,10 @@ function LeadFlowAppInner() {
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = activeTab === item.id && !selectedLeadId;
+                const unreadLeadsBadge =
+                  item.id === 'leads' && typeof analytics?.summary?.unreadLeads === 'number'
+                    ? analytics.summary.unreadLeads
+                    : 0;
                 return (
                   <button
                     key={item.id}
@@ -902,14 +917,21 @@ function LeadFlowAppInner() {
                       syncLeadUrl(null);
                       setMobileMenuOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 rounded-lg px-3.5 min-h-[44px] text-sm font-medium transition-colors ${
+                    className={`w-full flex items-center justify-between gap-2 rounded-lg px-3.5 min-h-[44px] text-sm font-medium transition-colors ${
                       active
                         ? 'bg-[#0F1E3D] text-white dark:bg-blue-600'
                         : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span>{item.label}</span>
+                    <span className="flex items-center gap-3 min-w-0">
+                      <Icon className="h-4 w-4 shrink-0" />
+                      <span>{item.label}</span>
+                    </span>
+                    {unreadLeadsBadge > 0 && (
+                      <span className="font-mono text-[11px] font-bold px-1.5 py-0.5 rounded bg-red-600 text-white tabular-nums shrink-0">
+                        {unreadLeadsBadge > 99 ? '99+' : unreadLeadsBadge}
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -1369,6 +1391,7 @@ function LeadFlowAppInner() {
                 onSelectLead={(id) => navigateToLead(id)}
                 onAddLead={() => setShowCreateLeadModal(true)}
                 onNotify={notify}
+                onLeadReadChanged={() => setRefreshCounter((c) => c + 1)}
                 refreshTrigger={refreshCounter}
               />
             ) : activeTab === 'pipeline' ? (
@@ -1437,6 +1460,10 @@ function LeadFlowAppInner() {
           ].map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id && !selectedLeadId;
+            const unreadLeadsBadge =
+              item.id === 'leads' && typeof analytics?.summary?.unreadLeads === 'number'
+                ? analytics.summary.unreadLeads
+                : 0;
             return (
               <button
                 key={item.id}
@@ -1446,13 +1473,20 @@ function LeadFlowAppInner() {
                   setSelectedLeadId(null);
                   syncLeadUrl(null);
                 }}
-                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors ${
+                className={`relative flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors ${
                   active
                     ? 'text-[#0F1E3D] dark:text-blue-400'
                     : 'text-slate-500 dark:text-slate-400'
                 }`}
               >
-                <Icon className={`h-5 w-5 ${active ? 'stroke-[2.25]' : ''}`} />
+                <div className="relative">
+                  <Icon className={`h-5 w-5 ${active ? 'stroke-[2.25]' : ''}`} />
+                  {unreadLeadsBadge > 0 && (
+                    <span className="absolute -top-1 -end-2.5 h-4 min-w-4 px-1 rounded-full bg-red-600 text-[9px] font-bold text-white flex items-center justify-center tabular-nums">
+                      {unreadLeadsBadge > 99 ? '99+' : unreadLeadsBadge}
+                    </span>
+                  )}
+                </div>
                 <span className="truncate max-w-full px-1">{item.label}</span>
               </button>
             );

@@ -21,6 +21,8 @@ import {
   Layers,
   UserCheck,
   Printer,
+  CheckCheck,
+  EyeOff,
 } from 'lucide-react';
 import { CustomField, FollowUpTask, Language, Lead, PipelineStage, Role, TeamMember } from '../../types/crm';
 import { getT } from '../../i18n/translations';
@@ -108,6 +110,8 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [answersTab, setAnswersTab] = useState<'structured' | 'raw'>('structured');
   const [updatingStageId, setUpdatingStageId] = useState<string | null>(null);
+  const [togglingRead, setTogglingRead] = useState(false);
+  const notifiedReadLeadRef = React.useRef<string | null>(null);
 
   const loadDetail = async () => {
     setLoading(true);
@@ -118,6 +122,10 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
       setActivities(res.activities || []);
       setFollowUps(res.followUps || []);
       setDuplicates(res.duplicates || []);
+      if (res.lead && notifiedReadLeadRef.current !== res.lead.id) {
+        notifiedReadLeadRef.current = res.lead.id;
+        onUpdated();
+      }
     } catch (err: any) {
       onNotify(err.message, 'error');
     } finally {
@@ -128,6 +136,34 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   useEffect(() => {
     loadDetail();
   }, [businessId, leadId]);
+
+  const handleToggleRead = async () => {
+    if (!lead || togglingRead) return;
+    const nextIsRead = !lead.is_read;
+    setTogglingRead(true);
+    try {
+      const res = await apiRequest<{ lead: Lead }>(`/businesses/${businessId}/leads/${lead.id}/read`, {
+        method: 'POST',
+        body: JSON.stringify({ isRead: nextIsRead }),
+      });
+      setLead((prev) => (prev ? { ...prev, ...res.lead, is_read: nextIsRead ? 1 : 0 } : prev));
+      onUpdated();
+      onNotify(
+        nextIsRead
+          ? isAr
+            ? 'تم تمييز العميل كمقروء'
+            : 'Marked as read'
+          : isAr
+            ? 'تمت إعادة العميل كغير مقروء (جديد)'
+            : 'Marked as unread (new)',
+        'info'
+      );
+    } catch (err: any) {
+      onNotify(err.message, 'error');
+    } finally {
+      setTogglingRead(false);
+    }
+  };
 
   const handleCopy = async (key: string, value: string) => {
     try {
@@ -259,10 +295,18 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   // Clean structured custom fields (hide internal _sheet_hash)
   const visibleCustomFields = customFields.filter((cf) => cf.field_key !== '_sheet_hash');
 
+  const isUnread = !lead.is_read;
+
   return (
     <div className="space-y-4 sm:space-y-6 crm-animate-enter">
       {/* Hero Header + Interactive Stage Progress */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+      <div
+        className={`rounded-xl border border-s-4 bg-white dark:bg-slate-900 overflow-hidden ${
+          isUnread
+            ? 'border-red-200 dark:border-red-900/70 border-s-red-600'
+            : 'border-emerald-200/80 dark:border-emerald-900/60 border-s-emerald-600'
+        }`}
+      >
         <div className="p-4 sm:p-6">
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 sm:gap-5">
             <div className="flex items-start gap-3 sm:gap-4 min-w-0">
@@ -310,6 +354,18 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                       </span>
                     </>
                   )}
+                  <span aria-hidden="true">·</span>
+                  <span
+                    className={`inline-flex items-center gap-1 font-bold ${
+                      isUnread ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                    }`}
+                  >
+                    <span
+                      className={`h-2 w-2 rounded-full ${isUnread ? 'bg-red-600' : 'bg-emerald-600'}`}
+                      aria-hidden="true"
+                    />
+                    {isUnread ? (isAr ? 'جديد · غير مقروء' : 'New · Unread') : isAr ? 'مقروء' : 'Read'}
+                  </span>
                 </div>
 
                 <h2 className="mt-1 text-lg sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 break-words">
@@ -378,6 +434,27 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                   <span>{t.sendEmail}</span>
                 </a>
               )}
+              <button
+                type="button"
+                disabled={togglingRead}
+                onClick={handleToggleRead}
+                className={`inline-flex items-center justify-center gap-1.5 rounded-lg border px-3 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold transition-colors whitespace-nowrap disabled:opacity-50 ${
+                  isUnread
+                    ? 'border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+                    : 'border-red-200 dark:border-red-900/70 bg-red-50/70 dark:bg-red-950/30 text-red-700 dark:text-red-300 hover:bg-red-100'
+                }`}
+              >
+                {isUnread ? <CheckCheck className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                <span>
+                  {isUnread
+                    ? isAr
+                      ? 'تحديد كمقروء'
+                      : 'Mark Read'
+                    : isAr
+                      ? 'تحديد كغير مقروء'
+                      : 'Mark Unread'}
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={() => window.print()}

@@ -60,6 +60,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               status_name_ar: targetStage?.name_ar,
               status_name_en: targetStage?.name_en,
               status_color: targetStage?.color,
+              is_read: 1,
             }
           : l
       )
@@ -310,24 +311,43 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
               </div>
 
               <div className="p-2.5 space-y-2.5 overflow-y-auto flex-1">
-                {stageLeads.map((lead) => (
-                  <div
-                    key={lead.id}
-                    draggable
-                    onDragStart={() => setDraggingId(lead.id)}
-                    onClick={() => onSelectLead(lead.id)}
-                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 cursor-grab active:cursor-grabbing hover:border-blue-400 transition-colors crm-cv-auto"
-                  >
-                    <div className="flex items-center justify-between text-[11px] text-slate-400">
-                      <span className="font-mono">{lead.lead_code}</span>
-                      <span>{lead.source}</span>
-                    </div>
-                    <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
-                      {lead.full_name}
-                    </div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                      {lead.interested_service || lead.campaign_name || '—'}
-                    </div>
+                {stageLeads.map((lead) => {
+                  const isUnread = !lead.is_read;
+                  return (
+                    <div
+                      key={lead.id}
+                      draggable
+                      onDragStart={() => setDraggingId(lead.id)}
+                      onClick={() => onSelectLead(lead.id)}
+                      className={`rounded-lg border border-s-4 p-3 cursor-grab active:cursor-grabbing transition-colors crm-cv-auto ${
+                        isUnread
+                          ? 'border-red-200 dark:border-red-900/70 border-s-red-600 bg-red-50/75 dark:bg-red-950/25 hover:border-red-400'
+                          : 'border-emerald-200/80 dark:border-emerald-900/50 border-s-emerald-600 bg-white dark:bg-slate-900 hover:border-emerald-400'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-slate-400">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className={`h-2 w-2 rounded-full shrink-0 ${isUnread ? 'bg-red-600 animate-pulse' : 'bg-emerald-600'}`}
+                            aria-hidden="true"
+                          />
+                          <span className="font-mono text-slate-600 dark:text-slate-300">{lead.lead_code}</span>
+                          <span
+                            className={`text-[10px] font-bold ${
+                              isUnread ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                            }`}
+                          >
+                            {isUnread ? (isAr ? 'جديد' : 'New') : isAr ? 'مقروء' : 'Read'}
+                          </span>
+                        </div>
+                        <span className="truncate">{lead.source}</span>
+                      </div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {lead.full_name}
+                      </div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                        {lead.interested_service || lead.campaign_name || '—'}
+                      </div>
 
                     <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2 text-[11px]" onClick={(e) => e.stopPropagation()}>
                       <span className="text-slate-500 truncate">
@@ -347,7 +367,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                       </select>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           );

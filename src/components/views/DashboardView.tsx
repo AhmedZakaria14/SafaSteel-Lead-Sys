@@ -83,9 +83,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const s = analytics.summary;
 
+  const unreadSuffix =
+    typeof s.unreadLeads === 'number'
+      ? ` · ${isAr ? `غير مقروء: ${s.unreadLeads}` : `Unread: ${s.unreadLeads}`}`
+      : '';
+
   const primaryKpis = [
     { label: t.totalLeads, value: s.total, sub: `${t.receivedToday}: ${s.today} · ${t.receivedWeek}: ${s.thisWeek}`, icon: Users, tone: 'text-[#0F1E3D] dark:text-blue-400' },
-    { label: t.newLeads, value: s.new, sub: `${t.receivedMonth}: ${s.thisMonth}`, icon: UserPlus, tone: 'text-blue-600 dark:text-blue-400' },
+    { label: t.newLeads, value: s.new, sub: `${t.receivedMonth}: ${s.thisMonth}${unreadSuffix}`, icon: UserPlus, tone: typeof s.unreadLeads === 'number' && s.unreadLeads > 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400' },
     { label: t.qualifiedLeads, value: s.qualified, sub: `${t.contactedLeads}: ${s.contacted}`, icon: TrendingUp, tone: 'text-teal-600 dark:text-teal-400' },
     { label: t.convertedLeads, value: s.converted, sub: `${t.conversionRate}: ${s.conversionRate}%`, icon: CheckCircle2, tone: 'text-emerald-600 dark:text-emerald-400' },
   ];

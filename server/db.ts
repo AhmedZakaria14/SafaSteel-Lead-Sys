@@ -312,6 +312,9 @@ function initSchema(db: SqlDb) {
       notes_summary TEXT,
       last_contact_at TEXT,
       next_follow_up_at TEXT,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      read_at TEXT,
+      read_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
       is_demo INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -328,6 +331,7 @@ function initSchema(db: SqlDb) {
     CREATE INDEX IF NOT EXISTS idx_leads_biz_created ON leads(business_id, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_leads_biz_status ON leads(business_id, status_id);
     CREATE INDEX IF NOT EXISTS idx_leads_biz_assigned ON leads(business_id, assigned_to_user_id);
+    CREATE INDEX IF NOT EXISTS idx_leads_biz_read ON leads(business_id, is_read);
 
     CREATE TABLE IF NOT EXISTS lead_status_history (
       id TEXT PRIMARY KEY,
@@ -453,6 +457,66 @@ function initSchema(db: SqlDb) {
   const memberCols = db.prepare('PRAGMA table_info(business_memberships)').all() as Array<{ name: string }>;
   if (!memberCols.some((c) => c.name === 'account_slot')) {
     db.exec("ALTER TABLE business_memberships ADD COLUMN account_slot TEXT NOT NULL DEFAULT 'accountant';");
+  }
+
+  const leadCols = db.prepare('PRAGMA table_info(leads)').all() as Array<{ name: string }>;
+  const hadIsRead = leadCols.some((c) => c.name === 'is_read');
+  if (!hadIsRead) {
+    db.exec('ALTER TABLE leads ADD COLUMN is_read INTEGER NOT NULL DEFAULT 0;');
+  }
+  if (!leadCols.some((c) => c.name === 'read_at')) {
+    db.exec('ALTER TABLE leads ADD COLUMN read_at TEXT;');
+  }
+  if (!leadCols.some((c) => c.name === 'read_by_user_id')) {
+    db.exec('ALTER TABLE leads ADD COLUMN read_by_user_id TEXT;');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_leads_biz_read ON leads(business_id, is_read);');
+
+  if (!hadIsRead) {
+    // One-time backfill for pre-existing DBs: mark older/already-handled leads as read (green),
+    // keeping only the newest <= 24h uncontacted batch as unread (red).
+    const nowIso = new Date().toISOString();
+    const businesses = db.prepare('SELECT id FROM businesses').all() as Array<{ id: string }>;
+    for (const biz of businesses) {
+      const maxRow = db
+        .prepare('SELECT MAX(created_at) as maxCreated FROM leads WHERE business_id = ?')
+        .get(biz.id) as { maxCreated: string | null } | undefined;
+      if (!maxRow?.maxCreated) continue;
+
+      const maxMs = Date.parse(maxRow.maxCreated);
+      const cutoffMs = Number.isFinite(maxMs) ? maxMs - 24 * 3600_000 : Date.now() - 24 * 3600_000;
+      const defaultStage = db
+        .prepare("SELECT id FROM lead_statuses WHERE business_id = ? AND (is_default = 1 OR key = 'new') ORDER BY is_default DESC LIMIT 1")
+        .get(biz.id) as { id: string } | undefined;
+
+      const existingRows = db
+        .prepare('SELECT id, created_at, status_id, last_contact_at, updated_at FROM leads WHERE business_id = ?')
+        .all(biz.id) as Array<{
+        id: string;
+        created_at: string;
+        status_id: string | null;
+        last_contact_at: string | null;
+        updated_at: string;
+      }>;
+
+      const markReadStmt = db.prepare('UPDATE leads SET is_read = 1, read_at = ? WHERE id = ?');
+      db.exec('BEGIN');
+      try {
+        for (const r of existingRows) {
+          const createdMs = Date.parse(r.created_at);
+          const alreadyHandled =
+            Boolean(r.last_contact_at) ||
+            (defaultStage?.id && r.status_id && r.status_id !== defaultStage.id) ||
+            (Number.isFinite(createdMs) && createdMs < cutoffMs);
+          if (alreadyHandled) {
+            markReadStmt.run(r.last_contact_at || r.updated_at || nowIso, r.id);
+          }
+        }
+        db.exec('COMMIT');
+      } catch {
+        db.exec('ROLLBACK');
+      }
+    }
   }
 }
 

@@ -262,9 +262,15 @@ export function changeLeadStatus(
 
   const now = new Date().toISOString();
   db.prepare(`
-    UPDATE leads SET status_id = ?, last_contact_at = COALESCE(last_contact_at, ?), updated_at = ?
+    UPDATE leads
+    SET status_id = ?,
+        last_contact_at = COALESCE(last_contact_at, ?),
+        is_read = 1,
+        read_at = COALESCE(read_at, ?),
+        read_by_user_id = COALESCE(read_by_user_id, ?),
+        updated_at = ?
     WHERE id = ? AND business_id = ?
-  `).run(params.toStatusId, now, now, params.leadId, params.businessId);
+  `).run(params.toStatusId, now, now, params.actorUserId || null, now, params.leadId, params.businessId);
 
   db.prepare(`
     INSERT INTO lead_status_history (id, business_id, lead_id, from_status_id, to_status_id, changed_by_user_id, note, created_at)

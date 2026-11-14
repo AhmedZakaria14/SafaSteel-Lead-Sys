@@ -265,5 +265,38 @@ function seedAlSafaWorkspace(db: SqlDb) {
     syncAttachedSheetToWorkspace(db, ALSAFA_WORKSPACE_ID, ATTACHED_SHEET_PATH, {
       emitNotificationOnChanges: false,
     });
+
+    // Distinguish historical sheet leads as already-read (green) while keeping the newest <= 24h batch unread (red)
+    const maxRow = db
+      .prepare('SELECT MAX(created_at) as maxCreated FROM leads WHERE business_id = ?')
+      .get(ALSAFA_WORKSPACE_ID) as { maxCreated: string | null } | undefined;
+    if (maxRow?.maxCreated) {
+      const maxMs = Date.parse(maxRow.maxCreated);
+      const cutoffMs = Number.isFinite(maxMs) ? maxMs - 24 * 3600_000 : Date.now() - 24 * 3600_000;
+      const defaultStage = db
+        .prepare("SELECT id FROM lead_statuses WHERE business_id = ? AND (is_default = 1 OR key = 'new') ORDER BY is_default DESC LIMIT 1")
+        .get(ALSAFA_WORKSPACE_ID) as { id: string } | undefined;
+
+      const seededRows = db
+        .prepare('SELECT id, created_at, status_id FROM leads WHERE business_id = ?')
+        .all(ALSAFA_WORKSPACE_ID) as Array<{ id: string; created_at: string; status_id: string | null }>;
+
+      const markReadStmt = db.prepare('UPDATE leads SET is_read = 1, read_at = ? WHERE id = ?');
+      db.exec('BEGIN');
+      try {
+        for (const r of seededRows) {
+          const createdMs = Date.parse(r.created_at);
+          const isHistorical =
+            (defaultStage?.id && r.status_id && r.status_id !== defaultStage.id) ||
+            (Number.isFinite(createdMs) && createdMs < cutoffMs);
+          if (isHistorical) {
+            markReadStmt.run(now, r.id);
+          }
+        }
+        db.exec('COMMIT');
+      } catch {
+        db.exec('ROLLBACK');
+      }
+    }
   }
 }

@@ -235,6 +235,7 @@ export const GlobalLeadSearch: React.FC<GlobalLeadSearchProps> = ({
                 const company = typeof customVals.company_name === 'string' ? customVals.company_name.trim() : '';
                 const stageColor = lead.status_color || '#2563EB';
                 const isSelected = idx === activeIndex;
+                const isUnread = !lead.is_read;
 
                 return (
                   <button
@@ -242,18 +243,26 @@ export const GlobalLeadSearch: React.FC<GlobalLeadSearchProps> = ({
                     type="button"
                     onMouseEnter={() => setActiveIndex(idx)}
                     onClick={() => handleChooseLead(lead.id)}
-                    className={`w-full text-start px-3.5 sm:px-4 py-3 min-h-[52px] flex items-center justify-between gap-3 transition-colors ${
-                      isSelected
-                        ? 'bg-blue-50/80 dark:bg-blue-950/35'
-                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                    className={`w-full text-start px-3.5 sm:px-4 py-3 min-h-[52px] border-s-4 flex items-center justify-between gap-3 transition-colors ${
+                      isUnread
+                        ? 'border-s-red-600 ' +
+                          (isSelected ? 'bg-red-50/90 dark:bg-red-950/35' : 'bg-red-50/50 dark:bg-red-950/15 hover:bg-red-50 dark:hover:bg-red-950/25')
+                        : 'border-s-emerald-600 ' +
+                          (isSelected ? 'bg-emerald-50/70 dark:bg-emerald-950/30' : 'hover:bg-emerald-50/40 dark:hover:bg-emerald-950/15')
                     }`}
                   >
                     <div className="flex items-start gap-3 min-w-0 flex-1">
                       <div
-                        className="h-9 w-9 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0 mt-0.5"
+                        className="h-9 w-9 rounded-lg flex items-center justify-center text-xs font-bold text-white shrink-0 mt-0.5 relative"
                         style={{ backgroundColor: stageColor }}
                       >
                         {getInitials(lead.full_name)}
+                        <span
+                          className={`absolute -top-1 -end-1 h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-slate-900 ${
+                            isUnread ? 'bg-red-600' : 'bg-emerald-600'
+                          }`}
+                          aria-hidden="true"
+                        />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
@@ -262,6 +271,13 @@ export const GlobalLeadSearch: React.FC<GlobalLeadSearchProps> = ({
                           </span>
                           <span className="font-mono text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded tabular-nums">
                             {lead.lead_code}
+                          </span>
+                          <span
+                            className={`text-[10px] font-bold ${
+                              isUnread ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                            }`}
+                          >
+                            {isUnread ? (isAr ? 'جديد' : 'New') : isAr ? 'مقروء' : 'Read'}
                           </span>
                           <span
                             className="text-[11px] font-semibold"

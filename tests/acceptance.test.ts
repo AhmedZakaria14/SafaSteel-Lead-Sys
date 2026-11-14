@@ -488,9 +488,121 @@ describe('LeadFlow CRM Acceptance Tests', () => {
       assert.equal(leadsRes.status, 200);
       const leadsJson = await leadsRes.json();
       assert.ok(leadsJson.leads.length > 0);
+      assert.equal(typeof leadsJson.unreadCount, 'number');
+      assert.ok(leadsJson.unreadCount > 0 && leadsJson.unreadCount < leadsJson.total);
+
+      const unreadLead = leadsJson.leads.find((l: any) => l.is_read === 0);
+      assert.ok(unreadLead, 'Expected newest seeded lead to be unread on sql.js');
+      const peekReadRes = await fetch(
+        `http://127.0.0.1:${port}/api/businesses/alsafa-steel-workspace/leads/${unreadLead.id}/read`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${loginJson.token}` },
+          body: JSON.stringify({ isRead: true }),
+        }
+      );
+      assert.equal(peekReadRes.status, 200);
+      const peekReadJson = await peekReadRes.json();
+      assert.equal(peekReadJson.lead.is_read, 1);
     } finally {
       await new Promise<void>((resolve) => srv.close(() => resolve()));
     }
+  });
+
+  it('21. Distinguishes new unread leads from previously read leads and transitions to read on peek/open/toggle', async () => {
+    const okLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'SafaSteels2026' }),
+    });
+    assert.equal(okLogin.status, 200);
+    const { token } = await okLogin.json();
+
+    // Seeding splits newest batch as unread (is_read=0) and historical rows as read (is_read=1)
+    const unreadRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads?readState=unread&pageSize=20`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert.equal(unreadRes.status, 200);
+    const unreadData = await unreadRes.json();
+    assert.ok(unreadData.total > 0, 'Expected unread newest leads');
+    assert.ok(unreadData.leads.every((l: any) => l.is_read === 0));
+
+    const readRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads?readState=read&pageSize=10`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert.equal(readRes.status, 200);
+    const readData = await readRes.json();
+    assert.ok(readData.total > 100, 'Expected historical seeded leads to be pre-marked read');
+    assert.ok(readData.leads.every((l: any) => l.is_read === 1));
+
+    // Create a brand-new lead -> starts as unread (is_read=0)
+    const createRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/leads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        fullName: 'أحمد قاسم الجديد',
+        phone: '01099887766',
+        interestedService: 'كابل تريه',
+      }),
+    });
+    assert.equal(createRes.status, 201);
+    const created = (await createRes.json()).lead;
+    assert.equal(created.is_read, 0);
+
+    // Quick Peek marks it read (is_read=1)
+    const peekRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${created.id}/read`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ isRead: true }),
+      }
+    );
+    assert.equal(peekRes.status, 200);
+    assert.equal((await peekRes.json()).lead.is_read, 1);
+
+    // Toggle back to unread (is_read=0), then opening full profile auto-marks it read again
+    const unpeekRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${created.id}/read`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ isRead: false }),
+      }
+    );
+    assert.equal(unpeekRes.status, 200);
+    assert.equal((await unpeekRes.json()).lead.is_read, 0);
+
+    const openDetailRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${created.id}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert.equal(openDetailRes.status, 200);
+    assert.equal((await openDetailRes.json()).lead.is_read, 1);
+
+    // Bulk mark_unread and bulk mark_read
+    const bulkUnread = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/leads/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ leadIds: [created.id], action: 'mark_unread' }),
+    });
+    assert.equal(bulkUnread.status, 200);
+
+    const bulkRead = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/leads/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ leadIds: [created.id], action: 'mark_read' }),
+    });
+    assert.equal(bulkRead.status, 200);
+
+    const analyticsRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/analytics`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(analyticsRes.status, 200);
+    const analyticsJson = await analyticsRes.json();
+    assert.equal(typeof analyticsJson.summary.unreadLeads, 'number');
   });
 });
 

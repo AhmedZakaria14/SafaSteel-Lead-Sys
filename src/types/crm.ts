@@ -114,6 +114,9 @@ export interface Lead {
   notes_summary?: string | null;
   last_contact_at?: string | null;
   next_follow_up_at?: string | null;
+  is_read?: number;
+  read_at?: string | null;
+  read_by_user_id?: string | null;
   is_demo: number;
   created_at: string;
   updated_at: string;
@@ -167,6 +170,7 @@ export interface AnalyticsResponse {
     today: number;
     thisWeek: number;
     thisMonth: number;
+    unreadLeads?: number;
     overdueFollowUps: number;
     upcomingFollowUps: number;
   };

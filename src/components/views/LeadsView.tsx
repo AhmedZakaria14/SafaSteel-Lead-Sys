@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Search,
   Plus,
@@ -23,6 +24,8 @@ import {
   Calendar,
   ArrowUpRight,
   Mail,
+  CheckCheck,
+  EyeOff,
 } from 'lucide-react';
 import { CustomField, Language, Lead, PipelineStage, Role, TeamMember } from '../../types/crm';
 import { getT } from '../../i18n/translations';
@@ -38,6 +41,7 @@ interface LeadsViewProps {
   onSelectLead: (leadId: string) => void;
   onAddLead: () => void;
   onNotify: (msg: string, variant?: 'success' | 'error' | 'info') => void;
+  onLeadReadChanged?: () => void;
   refreshTrigger: number;
 }
 
@@ -99,6 +103,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   onSelectLead,
   onAddLead,
   onNotify,
+  onLeadReadChanged,
   refreshTrigger,
 }) => {
   const t = getT(lang);
@@ -107,6 +112,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
   const [leads, setLeads] = useState<Lead[]>([]);
   const [total, setTotal] = useState(0);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -114,6 +120,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [readState, setReadState] = useState<'' | 'unread' | 'read'>('');
   const [sourceFilter, setSourceFilter] = useState('');
   const [assignedFilter, setAssignedFilter] = useState('');
   const [sortBy, setSortBy] = useState('created_at');
@@ -161,12 +168,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
   useEffect(() => {
     if (!peekLead) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setPeekLead(null);
     };
     window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [peekLead]);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [Boolean(peekLead)]);
 
   const fetchLeads = async () => {
     setLoading(true);
@@ -179,15 +191,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       });
       if (debouncedSearch) qs.set('q', debouncedSearch);
       if (statusFilter) qs.set('statusId', statusFilter);
+      if (readState) qs.set('readState', readState);
       if (sourceFilter) qs.set('source', sourceFilter);
       if (assignedFilter) qs.set('assignedTo', assignedFilter);
 
-      const res = await apiRequest<{ leads: Lead[]; total: number; totalPages: number }>(
+      const res = await apiRequest<{ leads: Lead[]; total: number; totalPages: number; unreadCount?: number }>(
         `/businesses/${businessId}/leads?${qs.toString()}`
       );
       setLeads(res.leads);
       setTotal(res.total);
       setTotalPages(res.totalPages);
+      if (typeof res.unreadCount === 'number') setUnreadCount(res.unreadCount);
       setSelectedIds([]);
       if (peekLead) {
         const refreshed = res.leads.find((l) => l.id === peekLead.id);
@@ -202,7 +216,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
   useEffect(() => {
     fetchLeads();
-  }, [businessId, page, debouncedSearch, statusFilter, sourceFilter, assignedFilter, sortBy, sortDir, refreshTrigger]);
+  }, [
+    businessId,
+    page,
+    debouncedSearch,
+    statusFilter,
+    readState,
+    sourceFilter,
+    assignedFilter,
+    sortBy,
+    sortDir,
+    refreshTrigger,
+  ]);
 
   const handleCopy = async (key: string, value: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -215,6 +240,83 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     }
   };
 
+  const applyLeadReadStateLocally = (leadId: string, nextIsRead: boolean) => {
+    let delta = 0;
+    setLeads((prev) =>
+      prev.map((l) => {
+        if (l.id !== leadId) return l;
+        const wasRead = Boolean(l.is_read);
+        if (!wasRead && nextIsRead) delta = -1;
+        else if (wasRead && !nextIsRead) delta = 1;
+        return {
+          ...l,
+          is_read: nextIsRead ? 1 : 0,
+          read_at: nextIsRead ? new Date().toISOString() : null,
+        };
+      })
+    );
+    if (delta !== 0) {
+      setUnreadCount((c) => Math.max(0, c + delta));
+    }
+    setPeekLead((prev) =>
+      prev && prev.id === leadId
+        ? {
+            ...prev,
+            is_read: nextIsRead ? 1 : 0,
+            read_at: nextIsRead ? new Date().toISOString() : null,
+          }
+        : prev
+    );
+  };
+
+  const handleToggleLeadRead = async (leadId: string, nextIsRead: boolean, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    const prevLead = leads.find((l) => l.id === leadId) || peekLead;
+    const prevRead = Boolean(prevLead?.is_read);
+    applyLeadReadStateLocally(leadId, nextIsRead);
+    try {
+      await apiRequest(`/businesses/${businessId}/leads/${leadId}/read`, {
+        method: 'POST',
+        body: JSON.stringify({ isRead: nextIsRead }),
+      });
+      if (readState) {
+        fetchLeads();
+      }
+      onLeadReadChanged?.();
+      onNotify(
+        nextIsRead
+          ? isAr
+            ? 'تم تمييز العميل كمقروء'
+            : 'Marked as read'
+          : isAr
+            ? 'تمت إعادة العميل كغير مقروء (جديد)'
+            : 'Marked as unread (new)',
+        'info'
+      );
+    } catch (err: any) {
+      applyLeadReadStateLocally(leadId, prevRead);
+      onNotify(err.message, 'error');
+    }
+  };
+
+  const handleOpenPeek = (lead: Lead, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setPeekLead({ ...lead, is_read: 1, read_at: lead.read_at || new Date().toISOString() });
+    if (!lead.is_read) {
+      applyLeadReadStateLocally(lead.id, true);
+      apiRequest(`/businesses/${businessId}/leads/${lead.id}/read`, {
+        method: 'POST',
+        body: JSON.stringify({ isRead: true }),
+      })
+        .then(() => {
+          onLeadReadChanged?.();
+        })
+        .catch(() => {
+          // ignore background read mark failure
+        });
+    }
+  };
+
   const handleQuickStatusUpdate = async (leadId: string, statusId: string) => {
     if (!statusId) return;
     setUpdatingLeadId(leadId);
@@ -224,6 +326,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         body: JSON.stringify({ statusId }),
       });
       const stage = stages.find((s) => s.id === statusId);
+      const targetBefore = leads.find((l) => l.id === leadId);
+      const wasUnread = targetBefore ? !targetBefore.is_read : false;
       setLeads((prev) =>
         prev.map((l) =>
           l.id === leadId
@@ -234,10 +338,16 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 status_name_ar: stage?.name_ar,
                 status_name_en: stage?.name_en,
                 status_color: stage?.color,
+                is_read: 1,
+                read_at: l.read_at || new Date().toISOString(),
               }
             : l
         )
       );
+      if (wasUnread) {
+        setUnreadCount((c) => Math.max(0, c - 1));
+        onLeadReadChanged?.();
+      }
       setPeekLead((prev) =>
         prev && prev.id === leadId
           ? {
@@ -247,6 +357,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               status_name_ar: stage?.name_ar,
               status_name_en: stage?.name_en,
               status_color: stage?.color,
+              is_read: 1,
+              read_at: prev.read_at || new Date().toISOString(),
             }
           : prev
       );
@@ -277,6 +389,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       onNotify(isAr ? 'تم تحديث الحالات بنجاح' : 'Bulk status updated', 'success');
       setBulkStatusId('');
       fetchLeads();
+      onLeadReadChanged?.();
     } catch (err: any) {
       onNotify(err.message, 'error');
     }
@@ -292,6 +405,31 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       onNotify(isAr ? 'تم تعيين الموظف للمحدد' : 'Bulk assignment completed', 'success');
       setBulkAssignId('');
       fetchLeads();
+      onLeadReadChanged?.();
+    } catch (err: any) {
+      onNotify(err.message, 'error');
+    }
+  };
+
+  const handleBulkReadState = async (action: 'mark_read' | 'mark_unread') => {
+    if (selectedIds.length === 0) return;
+    try {
+      await apiRequest(`/businesses/${businessId}/leads/bulk`, {
+        method: 'POST',
+        body: JSON.stringify({ leadIds: selectedIds, action }),
+      });
+      onNotify(
+        action === 'mark_read'
+          ? isAr
+            ? 'تم تحديد العملاء كمقروء'
+            : 'Selected leads marked as read'
+          : isAr
+            ? 'تم تحديد العملاء كغير مقروء'
+            : 'Selected leads marked as unread',
+        'success'
+      );
+      fetchLeads();
+      onLeadReadChanged?.();
     } catch (err: any) {
       onNotify(err.message, 'error');
     }
@@ -456,6 +594,71 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
           </div>
         </div>
 
+        {/* Read-State Filter Tabs (New Red vs Read Green) */}
+        <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+          <button
+            type="button"
+            onClick={() => {
+              setReadState('');
+              setPage(1);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap ${
+              readState === ''
+                ? 'bg-[#0F1E3D] dark:bg-blue-600 text-white border-transparent shadow-xs'
+                : 'bg-slate-50 dark:bg-slate-950 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            {isAr ? 'الكل (جديد ومقروء)' : 'All (New & Read)'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setReadState(readState === 'unread' ? '' : 'unread');
+              setPage(1);
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap ${
+              readState === 'unread'
+                ? 'bg-red-600 text-white border-red-600 shadow-xs'
+                : 'bg-red-50/75 dark:bg-red-950/25 border-red-200 dark:border-red-900/70 text-red-700 dark:text-red-300 hover:bg-red-100/80 dark:hover:bg-red-950/40'
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full shrink-0 ${readState === 'unread' ? 'bg-white' : 'bg-red-600 animate-pulse'}`}
+              aria-hidden="true"
+            />
+            <span>{isAr ? 'جديد · غير مقروء' : 'New · Unread'}</span>
+            <span
+              className={`font-mono text-[11px] px-1.5 py-0.5 rounded tabular-nums ${
+                readState === 'unread'
+                  ? 'bg-red-700 text-white'
+                  : 'bg-red-100 dark:bg-red-900/60 text-red-800 dark:text-red-200'
+              }`}
+            >
+              {unreadCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setReadState(readState === 'read' ? '' : 'read');
+              setPage(1);
+            }}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors whitespace-nowrap ${
+              readState === 'read'
+                ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs'
+                : 'bg-emerald-50/75 dark:bg-emerald-950/25 border-emerald-200 dark:border-emerald-900/70 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100/80 dark:hover:bg-emerald-950/40'
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full shrink-0 ${readState === 'read' ? 'bg-white' : 'bg-emerald-600'}`}
+              aria-hidden="true"
+            />
+            <span>{isAr ? 'مقروء (السابق)' : 'Read (Previous)'}</span>
+          </button>
+        </div>
+
         {/* Quick Pipeline Stage Filter Tabs */}
         {stages.length > 0 && (
           <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
@@ -562,6 +765,25 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 {t.confirm}
               </button>
             </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleBulkReadState('mark_read')}
+                className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100"
+              >
+                <CheckCheck className="h-3.5 w-3.5" />
+                <span>{isAr ? 'تحديد كمقروء' : 'Mark Read'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleBulkReadState('mark_unread')}
+                className="inline-flex items-center gap-1 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-2.5 py-1.5 text-xs font-semibold text-red-700 dark:text-red-300 hover:bg-red-100"
+              >
+                <EyeOff className="h-3.5 w-3.5" />
+                <span>{isAr ? 'تحديد كغير مقروء' : 'Mark Unread'}</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -597,12 +819,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   typeof customVals.inbox_url === 'string' && customVals.inbox_url.startsWith('http')
                     ? customVals.inbox_url
                     : '';
+                const isUnread = !lead.is_read;
 
                 return (
                   <div
                     key={lead.id}
                     onClick={() => onSelectLead(lead.id)}
-                    className="p-3.5 space-y-2.5 active:bg-slate-50 dark:active:bg-slate-800/50 transition-colors crm-cv-auto"
+                    className={`p-3.5 space-y-2.5 border-s-4 transition-colors crm-cv-auto ${
+                      isUnread
+                        ? 'border-s-red-600 bg-red-50/75 dark:bg-red-950/25 active:bg-red-100/75 dark:active:bg-red-950/40'
+                        : 'border-s-emerald-600 bg-emerald-50/35 dark:bg-emerald-950/15 active:bg-emerald-50/70 dark:active:bg-emerald-950/25'
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-2.5">
                       <div className="flex items-start gap-2.5 min-w-0 flex-1">
@@ -624,13 +851,31 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           </label>
                         )}
                         <div
-                          className="h-10 w-10 rounded-xl flex items-center justify-center text-xs font-bold text-white shrink-0"
+                          className="h-10 w-10 rounded-xl flex items-center justify-center text-xs font-bold text-white shrink-0 relative"
                           style={{ backgroundColor: stageColor }}
                         >
                           {getInitials(lead.full_name)}
+                          <span
+                            className={`absolute -top-1 -end-1 h-3 w-3 rounded-full ring-2 ring-white dark:ring-slate-900 ${
+                              isUnread ? 'bg-red-600' : 'bg-emerald-600'
+                            }`}
+                            aria-hidden="true"
+                          />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            <span
+                              className={`inline-flex items-center gap-1 font-bold ${
+                                isUnread ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                              }`}
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${isUnread ? 'bg-red-600' : 'bg-emerald-600'}`}
+                                aria-hidden="true"
+                              />
+                              {isUnread ? (isAr ? 'جديد · غير مقروء' : 'New · Unread') : isAr ? 'مقروء' : 'Read'}
+                            </span>
+                            <span aria-hidden="true">·</span>
                             <span className="font-mono font-semibold tabular-nums text-slate-700 dark:text-slate-300">
                               {lead.lead_code}
                             </span>
@@ -680,7 +925,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     </div>
 
                     {(lead.interested_service || specsPreview) && (
-                      <div className="rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-slate-800 px-3 py-2 text-xs">
+                      <div className="rounded-lg bg-white/80 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800 px-3 py-2 text-xs">
                         {lead.interested_service && (
                           <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
                             {lead.interested_service}
@@ -739,11 +984,24 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           type="button"
-                          onClick={() => setPeekLead(lead)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 min-h-[38px] text-xs font-medium text-slate-700 dark:text-slate-200"
+                          onClick={(e) => handleOpenPeek(lead, e)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 min-h-[38px] text-xs font-semibold text-slate-700 dark:text-slate-200 active:scale-[0.98]"
                         >
                           <Eye className="h-3.5 w-3.5" />
                           <span>{isAr ? 'معاينة' : 'Peek'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleLeadRead(lead.id, isUnread, e)}
+                          className={`inline-flex items-center justify-center rounded-lg border min-h-[38px] min-w-[38px] ${
+                            isUnread
+                              ? 'border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
+                              : 'border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300'
+                          }`}
+                          aria-label={isUnread ? (isAr ? 'تحديد كمقروء' : 'Mark Read') : isAr ? 'تحديد كغير مقروء' : 'Mark Unread'}
+                          title={isUnread ? (isAr ? 'تحديد كمقروء' : 'Mark Read') : isAr ? 'تحديد كغير مقروء' : 'Mark Unread'}
+                        >
+                          {isUnread ? <CheckCheck className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
                         </button>
                         <button
                           type="button"
@@ -847,15 +1105,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       ? customVals.inbox_url
                       : '';
                   const isPeeking = peekLead?.id === lead.id;
+                  const isUnread = !lead.is_read;
 
                   return (
                     <tr
                       key={lead.id}
                       onClick={() => onSelectLead(lead.id)}
-                      className={`group cursor-pointer transition-colors duration-150 ${
+                      className={`group cursor-pointer border-s-4 transition-colors duration-150 ${
                         isPeeking
-                          ? 'bg-blue-50/70 dark:bg-blue-950/30'
-                          : 'hover:bg-slate-50/90 dark:hover:bg-slate-800/45'
+                          ? 'border-s-blue-600 bg-blue-50/70 dark:bg-blue-950/30'
+                          : isUnread
+                            ? 'border-s-red-600 bg-red-50/60 dark:bg-red-950/20 hover:bg-red-100/60 dark:hover:bg-red-950/35'
+                            : 'border-s-emerald-600 bg-emerald-50/25 dark:bg-emerald-950/10 hover:bg-emerald-50/60 dark:hover:bg-emerald-950/25'
                       }`}
                     >
                       {canManage && (
@@ -885,14 +1146,29 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         <td className="py-3 px-3 align-top min-w-[190px]">
                           <div className="flex items-start gap-2.5">
                             <div
-                              className="h-8 w-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 mt-0.5"
+                              className="h-8 w-8 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 mt-0.5 relative"
                               style={{ backgroundColor: stageColor }}
                             >
                               {getInitials(lead.full_name)}
+                              <span
+                                className={`absolute -top-1 -end-1 h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-slate-900 ${
+                                  isUnread ? 'bg-red-600' : 'bg-emerald-600'
+                                }`}
+                                aria-hidden="true"
+                              />
                             </div>
                             <div className="min-w-0">
-                              <div className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors truncate max-w-[200px]">
-                                {lead.full_name}
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-semibold text-slate-900 dark:text-slate-100 group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors truncate max-w-[180px]">
+                                  {lead.full_name}
+                                </span>
+                                <span
+                                  className={`text-[10px] font-bold shrink-0 ${
+                                    isUnread ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                                  }`}
+                                >
+                                  {isUnread ? (isAr ? 'جديد' : 'New') : isAr ? 'مقروء' : 'Read'}
+                                </span>
                               </div>
                               {(companyName || jobTitle) && (
                                 <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[210px]">
@@ -1032,11 +1308,23 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         <div className="inline-flex items-center gap-1">
                           <button
                             type="button"
-                            onClick={() => setPeekLead(lead)}
+                            onClick={(e) => handleOpenPeek(lead, e)}
                             className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-600 dark:text-slate-300 hover:border-blue-300 dark:hover:border-blue-700 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                             title={isAr ? 'معاينة سريعة' : 'Quick Peek'}
                           >
                             <Eye className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleLeadRead(lead.id, isUnread, e)}
+                            className={`p-1.5 rounded-md border transition-colors ${
+                              isUnread
+                                ? 'border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100'
+                                : 'border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 hover:bg-red-100'
+                            }`}
+                            title={isUnread ? (isAr ? 'تحديد كمقروء' : 'Mark Read') : isAr ? 'تحديد كغير مقروء' : 'Mark Unread'}
+                          >
+                            {isUnread ? <CheckCheck className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                           </button>
                           {primaryPhone && (
                             <a
@@ -1109,82 +1397,122 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         </div>
       </div>
 
-      {/* Smooth Bottom-Sheet (Mobile) / Slide-Over (Desktop) Lead Quick-View */}
-      {peekLead && (
-        <div className="fixed inset-0 z-50 flex items-end sm:items-stretch sm:justify-end">
-          <div
-            className="fixed inset-0 bg-slate-950/45 backdrop-blur-[1px] transition-opacity"
-            onClick={() => setPeekLead(null)}
-            aria-hidden="true"
-          />
+      {/* Smooth Bottom-Sheet (Mobile) / Slide-Over (Desktop) Lead Quick-View rendered in Portal */}
+      {peekLead &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div className="fixed inset-0 z-[70] flex items-end sm:items-stretch sm:justify-end" role="dialog" aria-modal="true">
+            <div
+              className="fixed inset-0 bg-slate-950/50 backdrop-blur-[1px] transition-opacity"
+              onClick={() => setPeekLead(null)}
+              aria-hidden="true"
+            />
 
-          <aside
-            aria-label={peekLead.full_name}
-            className="relative z-10 w-full sm:max-w-lg h-[90dvh] sm:h-full rounded-t-2xl sm:rounded-none bg-white dark:bg-slate-900 border-t sm:border-t-0 sm:border-s border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col crm-sheet-enter overflow-hidden"
-          >
-            {/* Mobile Sheet Drag Handle */}
-            <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-slate-50/70 dark:bg-slate-950/60">
-              <span className="h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700" aria-hidden="true" />
-            </div>
+            <aside
+              aria-label={peekLead.full_name}
+              className="relative z-10 w-full sm:max-w-lg h-[90dvh] sm:h-full rounded-t-2xl sm:rounded-none bg-white dark:bg-slate-900 border-t sm:border-t-0 sm:border-s border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col crm-sheet-enter overflow-hidden"
+            >
+              {/* Mobile Sheet Drag Handle */}
+              <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-slate-50/70 dark:bg-slate-950/60 shrink-0">
+                <span className="h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700" aria-hidden="true" />
+              </div>
 
-            {/* Drawer Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3.5 min-w-0">
-                  <div
-                    className="h-11 w-11 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0 shadow-xs"
-                    style={{ backgroundColor: peekLead.status_color || '#2563EB' }}
-                  >
-                    {getInitials(peekLead.full_name)}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
-                      <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
-                        {peekLead.lead_code}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className={`font-semibold ${getSourceColorClass(peekLead.source)}`}>
-                        {formatSourceLabel(peekLead.source, isAr)}
-                      </span>
-                      <span aria-hidden="true">·</span>
-                      <span className="tabular-nums">{peekLead.created_at.slice(0, 10)}</span>
+              {/* Drawer Header */}
+              <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 shrink-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3.5 min-w-0">
+                    <div
+                      className="h-11 w-11 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0 shadow-xs"
+                      style={{ backgroundColor: peekLead.status_color || '#2563EB' }}
+                    >
+                      {getInitials(peekLead.full_name)}
                     </div>
-                    <h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100 break-words">
-                      {peekLead.full_name}
-                    </h3>
-                    {(peekCompany || peekJobTitle) && (
-                      <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
-                        {peekCompany && (
-                          <span className="inline-flex items-center gap-1 font-medium">
-                            <Building2 className="h-3.5 w-3.5 text-slate-400" />
-                            <span>{peekCompany}</span>
-                          </span>
-                        )}
-                        {peekCompany && peekJobTitle && <span className="text-slate-300 dark:text-slate-700">·</span>}
-                        {peekJobTitle && (
-                          <span className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
-                            <Briefcase className="h-3.5 w-3.5 text-slate-400" />
-                            <span>{peekJobTitle}</span>
-                          </span>
-                        )}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span
+                          className={`inline-flex items-center gap-1 font-bold ${
+                            !peekLead.is_read
+                              ? 'text-red-700 dark:text-red-400'
+                              : 'text-emerald-700 dark:text-emerald-400'
+                          }`}
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full ${!peekLead.is_read ? 'bg-red-600' : 'bg-emerald-600'}`}
+                            aria-hidden="true"
+                          />
+                          {!peekLead.is_read
+                            ? isAr
+                              ? 'جديد · غير مقروء'
+                              : 'New · Unread'
+                            : isAr
+                              ? 'مقروء'
+                              : 'Read'}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
+                          {peekLead.lead_code}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className={`font-semibold ${getSourceColorClass(peekLead.source)}`}>
+                          {formatSourceLabel(peekLead.source, isAr)}
+                        </span>
+                        <span aria-hidden="true">·</span>
+                        <span className="tabular-nums">{peekLead.created_at.slice(0, 10)}</span>
                       </div>
-                    )}
+                      <h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100 break-words">
+                        {peekLead.full_name}
+                      </h3>
+                      {(peekCompany || peekJobTitle) && (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+                          {peekCompany && (
+                            <span className="inline-flex items-center gap-1 font-medium">
+                              <Building2 className="h-3.5 w-3.5 text-slate-400" />
+                              <span>{peekCompany}</span>
+                            </span>
+                          )}
+                          {peekCompany && peekJobTitle && <span className="text-slate-300 dark:text-slate-700">·</span>}
+                          {peekJobTitle && (
+                            <span className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                              <Briefcase className="h-3.5 w-3.5 text-slate-400" />
+                              <span>{peekJobTitle}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleLeadRead(peekLead.id, !peekLead.is_read)}
+                      className={`inline-flex items-center gap-1 rounded-lg border px-2.5 min-h-[38px] text-[11px] font-semibold transition-colors ${
+                        !peekLead.is_read
+                          ? 'border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
+                          : 'border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300'
+                      }`}
+                      title={!peekLead.is_read ? (isAr ? 'تحديد كمقروء' : 'Mark Read') : isAr ? 'تحديد كغير مقروء' : 'Mark Unread'}
+                    >
+                      {!peekLead.is_read ? <CheckCheck className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                      <span className="hidden sm:inline">
+                        {!peekLead.is_read ? (isAr ? 'مقروء' : 'Mark Read') : isAr ? 'غير مقروء' : 'Mark Unread'}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPeekLead(null)}
+                      className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 transition-colors"
+                      title={t.cancel}
+                      aria-label={t.cancel}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
                   </div>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => setPeekLead(null)}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 transition-colors shrink-0"
-                  title={t.cancel}
-                >
-                  <X className="h-4 w-4" />
-                </button>
               </div>
-            </div>
 
-            {/* Scrollable Body */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 space-y-5">
               {/* Interactive Stage Selector */}
               <div>
                 <div className="text-xs font-semibold text-slate-500 dark:text-slate-400 mb-2">
@@ -1358,7 +1686,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             </div>
 
             {/* Sticky Drawer Footer Actions */}
-            <div className="p-3.5 sm:p-4 pb-safe border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 flex flex-wrap items-center justify-between gap-2">
+            <div className="p-3.5 sm:p-4 pb-safe border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 flex flex-wrap items-center justify-between gap-2 shrink-0">
               <div className="flex items-center gap-2">
                 {peekPhone && (
                   <a
@@ -1416,8 +1744,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </button>
             </div>
           </aside>
-        </div>
-      )}
+        </div>,
+          document.body
+        )}
     </div>
   );
 };

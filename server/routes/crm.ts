@@ -716,6 +716,7 @@ export function createCrmRoutes(
     const source = typeof req.query.source === 'string' ? req.query.source : '';
     const assignedTo = typeof req.query.assignedTo === 'string' ? req.query.assignedTo : '';
     const campaign = typeof req.query.campaign === 'string' ? req.query.campaign : '';
+    const readState = typeof req.query.readState === 'string' ? req.query.readState : '';
     const sortBy = typeof req.query.sortBy === 'string' ? req.query.sortBy : 'created_at';
     const sortDir = req.query.sortDir === 'asc' ? 'ASC' : 'DESC';
 
@@ -746,6 +747,11 @@ export function createCrmRoutes(
     if (campaign) {
       where.push('l.campaign_name = ?');
       params.push(campaign);
+    }
+    if (readState === 'unread') {
+      where.push('COALESCE(l.is_read, 0) = 0');
+    } else if (readState === 'read') {
+      where.push('COALESCE(l.is_read, 0) = 1');
     }
     if (q) {
       const normalizedQ = normalizeArabicDigits(q);
@@ -779,6 +785,16 @@ export function createCrmRoutes(
       .prepare(`SELECT COUNT(*) as total FROM leads l WHERE ${whereClause}`)
       .get(...(params as any[])) as { total: number };
 
+    const unreadScopeWhere =
+      req.membership?.role === 'employee'
+        ? 'business_id = ? AND assigned_to_user_id = ? AND COALESCE(is_read, 0) = 0'
+        : 'business_id = ? AND COALESCE(is_read, 0) = 0';
+    const unreadScopeParams =
+      req.membership?.role === 'employee' ? [businessId, req.authUser!.id] : [businessId];
+    const unreadRow = db
+      .prepare(`SELECT COUNT(*) as cnt FROM leads WHERE ${unreadScopeWhere}`)
+      .get(...unreadScopeParams) as { cnt: number };
+
     const offset = (page - 1) * pageSize;
     const rows = db
       .prepare(`
@@ -799,6 +815,7 @@ export function createCrmRoutes(
     res.json({
       leads: rows,
       total: totalRow.total,
+      unreadCount: unreadRow?.cnt || 0,
       page,
       pageSize,
       totalPages: Math.max(1, Math.ceil(totalRow.total / pageSize)),
@@ -878,9 +895,11 @@ export function createCrmRoutes(
         }
       } else if (action === 'assign') {
         const now = new Date().toISOString();
-        const stmt = db.prepare('UPDATE leads SET assigned_to_user_id = ?, updated_at = ? WHERE id = ? AND business_id = ?');
+        const stmt = db.prepare(
+          'UPDATE leads SET assigned_to_user_id = ?, is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?), updated_at = ? WHERE id = ? AND business_id = ?'
+        );
         for (const leadId of leadIds) {
-          const info = stmt.run(assignedToUserId || null, now, leadId, businessId);
+          const info = stmt.run(assignedToUserId || null, now, req.authUser?.id || null, now, leadId, businessId);
           if (info.changes > 0) {
             updated += 1;
             db.prepare(`
@@ -889,12 +908,26 @@ export function createCrmRoutes(
             `).run(crypto.randomUUID(), businessId, leadId, req.authUser?.id || null, now);
           }
         }
+      } else if (action === 'mark_read' || action === 'mark_unread') {
+        const now = new Date().toISOString();
+        const isReadVal = action === 'mark_read' ? 1 : 0;
+        const stmt = db.prepare(
+          isReadVal
+            ? 'UPDATE leads SET is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?) WHERE id = ? AND business_id = ?'
+            : 'UPDATE leads SET is_read = 0, read_at = NULL, read_by_user_id = NULL WHERE id = ? AND business_id = ?'
+        );
+        for (const leadId of leadIds) {
+          const info = isReadVal
+            ? stmt.run(now, req.authUser?.id || null, leadId, businessId)
+            : stmt.run(leadId, businessId);
+          if (info.changes > 0) updated += 1;
+        }
       } else {
         return res.status(400).json({ error: 'Invalid bulk action' });
       }
 
       if (updated > 0) {
-        if (updated > 1) {
+        if (updated > 1 && (action === 'status' || action === 'assign')) {
           createAndBroadcastNotification(db, {
             businessId,
             userId: null,
@@ -1005,6 +1038,22 @@ export function createCrmRoutes(
       return res.status(403).json({ error: 'Forbidden: You can only access leads assigned to you' });
     }
 
+    // Opening the lead profile automatically marks an unread lead as read (green)
+    if (!lead.is_read) {
+      const readNow = new Date().toISOString();
+      db.prepare(`
+        UPDATE leads
+        SET is_read = 1,
+            read_at = COALESCE(read_at, ?),
+            read_by_user_id = COALESCE(read_by_user_id, ?)
+        WHERE id = ? AND business_id = ?
+      `).run(readNow, req.authUser?.id || null, leadId, businessId);
+      lead.is_read = 1;
+      lead.read_at = lead.read_at || readNow;
+      lead.read_by_user_id = lead.read_by_user_id || req.authUser?.id || null;
+      broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId, isRead: true });
+    }
+
     const statusHistory = db
       .prepare(`
         SELECT h.*, fs.name_ar as from_ar, fs.name_en as from_en, ts.name_ar as to_ar, ts.name_en as to_en, u.full_name as changed_by_name
@@ -1052,6 +1101,38 @@ export function createCrmRoutes(
     res.json({ lead, statusHistory, notes, activities, followUps, duplicates });
   });
 
+  // Explicit Mark Lead Read / Unread (used by Quick Peek & toggles)
+  router.post('/businesses/:businessId/leads/:leadId/read', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
+    const { businessId, leadId } = req.params;
+    const existing = db.prepare('SELECT id, assigned_to_user_id, is_read FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId) as any;
+    if (!existing) return res.status(404).json({ error: 'Lead not found' });
+
+    if (req.membership?.role === 'employee' && existing.assigned_to_user_id !== req.authUser!.id) {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const wantRead = req.body?.isRead !== false;
+    const now = new Date().toISOString();
+    if (wantRead) {
+      db.prepare(`
+        UPDATE leads
+        SET is_read = 1,
+            read_at = COALESCE(read_at, ?),
+            read_by_user_id = COALESCE(read_by_user_id, ?)
+        WHERE id = ? AND business_id = ?
+      `).run(now, req.authUser?.id || null, leadId, businessId);
+    } else {
+      db.prepare('UPDATE leads SET is_read = 0, read_at = NULL, read_by_user_id = NULL WHERE id = ? AND business_id = ?').run(
+        leadId,
+        businessId
+      );
+    }
+
+    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId);
+    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId, isRead: wantRead });
+    res.json({ lead: updated });
+  });
+
   // Update Lead info (never overwrites original_answers_json)
   router.patch('/businesses/:businessId/leads/:leadId', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId, leadId } = req.params;
@@ -1076,6 +1157,9 @@ export function createCrmRoutes(
           interested_service = COALESCE(?, interested_service),
           custom_values_json = COALESCE(?, custom_values_json),
           notes_summary = COALESCE(?, notes_summary),
+          is_read = 1,
+          read_at = COALESCE(read_at, ?),
+          read_by_user_id = COALESCE(read_by_user_id, ?),
           updated_at = ?
       WHERE id = ? AND business_id = ?
     `).run(
@@ -1086,6 +1170,8 @@ export function createCrmRoutes(
       interestedService ?? null,
       customValues ? JSON.stringify(customValues) : null,
       notesSummary ?? null,
+      now,
+      req.authUser?.id || null,
       now,
       leadId,
       businessId
@@ -1149,8 +1235,12 @@ export function createCrmRoutes(
       if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
       const now = new Date().toISOString();
-      db.prepare('UPDATE leads SET assigned_to_user_id = ?, updated_at = ? WHERE id = ? AND business_id = ?').run(
+      db.prepare(
+        'UPDATE leads SET assigned_to_user_id = ?, is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?), updated_at = ? WHERE id = ? AND business_id = ?'
+      ).run(
         assignedToUserId || null,
+        now,
+        req.authUser?.id || null,
         now,
         leadId,
         businessId
@@ -1217,9 +1307,13 @@ export function createCrmRoutes(
       now
     );
 
-    db.prepare('UPDATE leads SET notes_summary = ?, last_contact_at = ?, updated_at = ? WHERE id = ?').run(
+    db.prepare(
+      'UPDATE leads SET notes_summary = ?, last_contact_at = ?, is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?), updated_at = ? WHERE id = ?'
+    ).run(
       content.trim().slice(0, 240),
       now,
+      now,
+      req.authUser?.id || null,
       now,
       leadId
     );
@@ -1303,7 +1397,9 @@ export function createCrmRoutes(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     `).run(id, businessId, leadId, assignee, req.authUser!.id, title.trim(), notes?.trim() || null, dueAt, now);
 
-    db.prepare('UPDATE leads SET next_follow_up_at = ?, updated_at = ? WHERE id = ?').run(dueAt, now, leadId);
+    db.prepare(
+      'UPDATE leads SET next_follow_up_at = ?, is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?), updated_at = ? WHERE id = ?'
+    ).run(dueAt, now, req.authUser?.id || null, now, leadId);
 
     db.prepare(`
       INSERT INTO lead_activities (id, business_id, lead_id, actor_user_id, activity_type, description_ar, description_en, metadata_json, created_at)
@@ -1752,6 +1848,7 @@ export function createCrmRoutes(
     let todayCount = 0;
     let weekCount = 0;
     let monthCount = 0;
+    let unreadLeadsCount = 0;
 
     const statusDistMap = new Map<string, { key: string; nameAr: string; nameEn: string; color: string; count: number }>();
     const sourceMap = new Map<string, number>();
@@ -1762,6 +1859,7 @@ export function createCrmRoutes(
     const employeeMap = new Map<string, { name: string; total: number; contacted: number; converted: number }>();
 
     for (const l of leads) {
+      if (!l.is_read) unreadLeadsCount += 1;
       const t = new Date(l.created_at).getTime();
       if (t >= todayMs) todayCount += 1;
       if (t >= weekAgoMs) weekCount += 1;
@@ -1894,6 +1992,7 @@ export function createCrmRoutes(
         today: todayCount,
         thisWeek: weekCount,
         thisMonth: monthCount,
+        unreadLeads: unreadLeadsCount,
         overdueFollowUps,
         upcomingFollowUps,
       },
