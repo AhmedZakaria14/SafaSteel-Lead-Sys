@@ -58,15 +58,15 @@ export const FollowUpsView: React.FC<FollowUpsViewProps> = ({
   const nowIso = new Date().toISOString();
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4">
-        <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+    <div className="space-y-4 crm-animate-enter">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 sm:p-4">
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800 overflow-x-auto no-scrollbar max-w-full">
           {(['all', 'overdue', 'upcoming', 'completed'] as const).map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setFilter(f)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+              className={`px-3 py-1.5 min-h-[38px] rounded-md text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
                 filter === f
                   ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-xs'
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -82,7 +82,7 @@ export const FollowUpsView: React.FC<FollowUpsViewProps> = ({
             </button>
           ))}
         </div>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
+        <p className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
           {isAr
             ? 'إدارة مهام المتابعة المجدولة. (ملاحظة: لا يتم إرسال تذكيرات واتساب آلية بدون ربط WhatsApp Business API معتمد).'
             : 'Manage scheduled follow-ups. Automated WhatsApp reminders are never claimed without an authorized WhatsApp Business API.'}
@@ -103,8 +103,8 @@ export const FollowUpsView: React.FC<FollowUpsViewProps> = ({
           tasks.map((task) => {
             const isOverdue = task.status === 'pending' && task.due_at < nowIso;
             return (
-              <div key={task.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
-                <div className="space-y-1">
+              <div key={task.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 hover:bg-slate-50/70 dark:hover:bg-slate-800/30 crm-cv-auto">
+                <div className="space-y-1.5 min-w-0">
                   <div className="flex items-center gap-2 text-xs">
                     {task.status === 'completed' ? (
                       <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
@@ -113,18 +113,18 @@ export const FollowUpsView: React.FC<FollowUpsViewProps> = ({
                     ) : (
                       <Clock className="h-4 w-4 text-blue-600 shrink-0" />
                     )}
-                    <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">{task.title}</span>
+                    <span className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate">{task.title}</span>
                     {isOverdue && (
-                      <span className="text-xs font-medium text-red-600 dark:text-red-400">
+                      <span className="text-xs font-medium text-red-600 dark:text-red-400 shrink-0">
                         · {isAr ? 'متأخرة' : 'Overdue'}
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-2">
+                  <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
                     <button
                       type="button"
                       onClick={() => onSelectLead(task.lead_id)}
-                      className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline"
+                      className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline min-h-[32px]"
                     >
                       <span>{task.lead_name} ({task.lead_code})</span>
                       <ArrowUpRight className="h-3 w-3" />
@@ -141,7 +141,7 @@ export const FollowUpsView: React.FC<FollowUpsViewProps> = ({
                   <button
                     type="button"
                     onClick={() => markComplete(task.id)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 shrink-0"
+                    className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 px-3 min-h-[42px] sm:min-h-0 sm:py-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 shrink-0"
                   >
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     <span>{t.markComplete}</span>

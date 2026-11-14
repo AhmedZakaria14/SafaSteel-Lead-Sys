@@ -76,12 +76,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-slate-50 dark:bg-[#090E1A] text-slate-900 dark:text-slate-100 px-4 py-6">
+    <div className="min-h-[100dvh] flex flex-col justify-between bg-slate-50 dark:bg-[#090E1A] text-slate-900 dark:text-slate-100 px-4 py-5 pt-safe pb-safe">
       <div className="max-w-md w-full mx-auto flex items-center justify-end gap-2">
         <button
           type="button"
           onClick={onToggleLang}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3 py-1.5 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 min-h-[44px] text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
         >
           <Languages className="h-3.5 w-3.5" />
           <span>{lang === 'ar' ? 'EN' : 'العربية'}</span>
@@ -89,22 +89,22 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         <button
           type="button"
           onClick={onToggleTheme}
-          className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+          className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 min-h-[44px] min-w-[44px] flex items-center justify-center hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
           aria-label="Toggle theme"
         >
           {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
         </button>
       </div>
 
-      <div className="max-w-md w-full mx-auto my-auto py-8">
+      <div className="max-w-md w-full mx-auto my-auto py-4 sm:py-8">
         <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xl shadow-slate-200/50 dark:shadow-none overflow-hidden crm-animate-enter">
-          <div className="bg-[#0F1E3D] px-6 py-6 text-white">
+          <div className="bg-[#0F1E3D] px-5 sm:px-6 py-5 sm:py-6 text-white">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wider text-blue-300">
                   {t.brandName}
                 </div>
-                <h1 className="mt-1 text-xl font-bold tracking-tight">
+                <h1 className="mt-1 text-lg sm:text-xl font-bold tracking-tight">
                   {isAr ? 'الصفا ستيل | إدارة العملاء' : 'Al-Safa Steel CRM'}
                 </h1>
               </div>
@@ -115,7 +115,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <p className="mt-2.5 text-xs text-slate-300 leading-relaxed">{t.loginSubtitle}</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <form onSubmit={handleSubmit} className="p-5 sm:p-6 space-y-4">
             {errorMsg && (
               <div
                 role="alert"
@@ -139,12 +139,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   type="text"
                   dir="ltr"
                   autoComplete="username"
-                  autoFocus
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="admin"
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 ps-9 pe-3.5 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white dark:focus:bg-slate-950"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 ps-9 pe-3.5 py-2.5 min-h-[44px] text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white dark:focus:bg-slate-950"
                 />
               </div>
             </div>
@@ -167,12 +168,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 ps-9 pe-10 py-2.5 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white dark:focus:bg-slate-950"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 ps-9 pe-11 py-2.5 min-h-[44px] text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 focus:bg-white dark:focus:bg-slate-950"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute top-1/2 -translate-y-1/2 end-2.5 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  className="absolute top-1/2 -translate-y-1/2 end-1.5 min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -183,12 +184,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <button
               type="submit"
               disabled={submitting}
-              className="w-full rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 py-2.5 px-4 text-sm font-semibold text-white transition-colors disabled:opacity-60"
+              className="w-full rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 py-3 px-4 min-h-[46px] text-sm font-semibold text-white transition-colors disabled:opacity-60"
             >
               {submitting ? t.signingIn : t.signIn}
             </button>
 
-            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+            <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 text-center">
               <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
               <span>
                 {isAr
@@ -200,7 +201,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
         </div>
       </div>
 
-      <div className="text-center text-[11px] text-slate-400">
+      <div className="text-center text-[11px] text-slate-400 pb-1">
         {isAr ? 'الصفا ستيل — نظام إدارة العملاء والمبيعات' : 'Al-Safa Steel — LeadFlow CRM'}
       </div>
     </div>

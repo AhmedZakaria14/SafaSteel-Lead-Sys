@@ -344,27 +344,27 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   return (
     <div className="space-y-4 crm-animate-enter">
       {/* Toolbar & Stage Segmented Filter */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3.5">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="relative flex-1 max-w-md">
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 sm:p-4 space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3">
+          <div className="relative flex-1 lg:max-w-md">
             <Search className="h-4 w-4 text-slate-400 absolute top-1/2 -translate-y-1/2 start-3" />
             <input
               type="text"
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder={t.searchLeads}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 ps-9 pe-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-shadow"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 ps-9 pe-3 py-2 min-h-[44px] sm:min-h-[38px] text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600 transition-shadow"
             />
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
             <select
               value={sourceFilter}
               onChange={(e) => {
                 setSourceFilter(e.target.value);
                 setPage(1);
               }}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200"
+              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 min-h-[42px] sm:min-h-[36px] text-base sm:text-xs font-medium text-slate-700 dark:text-slate-200"
             >
               <option value="">{t.allSources}</option>
               <option value="facebook_lead_ads">{isAr ? 'إعلانات فيسبوك (Facebook)' : 'Facebook Lead Ads'}</option>
@@ -381,7 +381,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   setAssignedFilter(e.target.value);
                   setPage(1);
                 }}
-                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200"
+                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 min-h-[42px] sm:min-h-[36px] text-base sm:text-xs font-medium text-slate-700 dark:text-slate-200"
               >
                 <option value="">{t.allEmployees}</option>
                 <option value="unassigned">{t.unassigned}</option>
@@ -395,7 +395,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </select>
             )}
 
-            <div className="relative">
+            <div className="relative hidden md:block">
               <button
                 type="button"
                 onClick={() => setShowColPicker((v) => !v)}
@@ -430,7 +430,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             <button
               type="button"
               onClick={() => handleExport('csv')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 min-h-[42px] sm:min-h-[36px] text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
             >
               <Download className="h-3.5 w-3.5" />
               <span>CSV</span>
@@ -439,7 +439,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             <button
               type="button"
               onClick={() => handleExport('xlsx')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+              className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 min-h-[42px] sm:min-h-[36px] text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
             >
               <FileSpreadsheet className="h-3.5 w-3.5" />
               <span>Excel</span>
@@ -448,7 +448,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             <button
               type="button"
               onClick={onAddLead}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white transition-colors whitespace-nowrap"
+              className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-3.5 min-h-[44px] sm:min-h-[36px] text-xs font-semibold text-white transition-colors whitespace-nowrap"
             >
               <Plus className="h-3.5 w-3.5" />
               <span>{t.addLead}</span>
@@ -458,7 +458,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
         {/* Quick Pipeline Stage Filter Tabs */}
         {stages.length > 0 && (
-          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          <div className="pt-2.5 border-t border-slate-100 dark:border-slate-800 flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
             <button
               type="button"
               onClick={() => {
@@ -566,22 +566,203 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         )}
       </div>
 
-      {/* Table */}
+      {/* Mobile Cards + Desktop Table */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
         {loading ? (
-          <div className="p-6 space-y-3 animate-pulse">
+          <div className="p-4 sm:p-6 space-y-3 animate-pulse">
             {Array.from({ length: 6 }).map((_, i) => (
-              <div key={i} className="h-12 rounded-lg bg-slate-100 dark:bg-slate-800" />
+              <div key={i} className="h-16 sm:h-12 rounded-lg bg-slate-100 dark:bg-slate-800" />
             ))}
           </div>
         ) : leads.length === 0 ? (
-          <div className="p-12 text-center">
+          <div className="p-10 sm:p-12 text-center">
             <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">{t.noLeadsTitle}</h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{t.noLeadsDesc}</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-start border-collapse">
+          <>
+            {/* Mobile-Native Card List (No Sideways Table Scroll) */}
+            <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+              {leads.map((lead) => {
+                const customVals = safeParseJson(lead.custom_values_json);
+                const primaryPhone = lead.phone_e164 || lead.phone || '';
+                const whatsappNum = primaryPhone.replace(/\D/g, '');
+                const companyName = typeof customVals.company_name === 'string' ? customVals.company_name.trim() : '';
+                const specsPreview =
+                  (typeof customVals.quantity_sizes === 'string' && customVals.quantity_sizes.trim()) ||
+                  lead.notes_summary ||
+                  '';
+                const stageColor = lead.status_color || '#2563EB';
+                const inboxUrl =
+                  typeof customVals.inbox_url === 'string' && customVals.inbox_url.startsWith('http')
+                    ? customVals.inbox_url
+                    : '';
+
+                return (
+                  <div
+                    key={lead.id}
+                    onClick={() => onSelectLead(lead.id)}
+                    className="p-3.5 space-y-2.5 active:bg-slate-50 dark:active:bg-slate-800/50 transition-colors crm-cv-auto"
+                  >
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                        {canManage && (
+                          <label
+                            className="flex items-center justify-center min-h-[36px] min-w-[28px] -ms-1 shrink-0"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.includes(lead.id)}
+                              onChange={(e) => {
+                                setSelectedIds((prev) =>
+                                  e.target.checked ? [...prev, lead.id] : prev.filter((id) => id !== lead.id)
+                                );
+                              }}
+                              className="h-4 w-4 rounded border-slate-300 dark:border-slate-700"
+                            />
+                          </label>
+                        )}
+                        <div
+                          className="h-10 w-10 rounded-xl flex items-center justify-center text-xs font-bold text-white shrink-0"
+                          style={{ backgroundColor: stageColor }}
+                        >
+                          {getInitials(lead.full_name)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            <span className="font-mono font-semibold tabular-nums text-slate-700 dark:text-slate-300">
+                              {lead.lead_code}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className={`font-semibold truncate ${getSourceColorClass(lead.source)}`}>
+                              {formatSourceLabel(lead.source, isAr)}
+                            </span>
+                            <span aria-hidden="true">·</span>
+                            <span className="tabular-nums shrink-0">{lead.created_at.slice(0, 10)}</span>
+                          </div>
+                          <h4 className="mt-0.5 text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                            {lead.full_name}
+                          </h4>
+                          {companyName && (
+                            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                              <Building2 className="h-3 w-3 shrink-0" />
+                              <span className="truncate">{companyName}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                        <select
+                          aria-label={t.status}
+                          value={lead.status_id || ''}
+                          disabled={updatingLeadId === lead.id}
+                          onChange={(e) => handleQuickStatusUpdate(lead.id, e.target.value)}
+                          className="rounded-lg border px-2 py-1 min-h-[36px] text-xs font-semibold max-w-[120px] truncate"
+                          style={{
+                            color: stageColor,
+                            backgroundColor: `${stageColor}14`,
+                            borderColor: `${stageColor}45`,
+                          }}
+                        >
+                          {stages.map((s) => (
+                            <option
+                              key={s.id}
+                              value={s.id}
+                              className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                            >
+                              {isAr ? s.name_ar : s.name_en}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {(lead.interested_service || specsPreview) && (
+                      <div className="rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-slate-800 px-3 py-2 text-xs">
+                        {lead.interested_service && (
+                          <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                            {lead.interested_service}
+                          </div>
+                        )}
+                        {specsPreview && (
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">
+                            {specsPreview}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div
+                      className="flex items-center justify-between gap-2 pt-0.5"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {primaryPhone ? (
+                          <a
+                            href={`tel:${primaryPhone}`}
+                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 dark:border-blue-900/70 bg-blue-50/70 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-2.5 min-h-[38px] text-xs font-semibold"
+                          >
+                            <Phone className="h-3.5 w-3.5 shrink-0" />
+                            <span className="font-mono tabular-nums truncate max-w-[115px]" dir="ltr">
+                              {primaryPhone}
+                            </span>
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">—</span>
+                        )}
+                        {whatsappNum && (
+                          <a
+                            href={`https://wa.me/${whatsappNum}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 min-h-[38px] min-w-[38px]"
+                            aria-label="WhatsApp"
+                          >
+                            <MessageSquare className="h-4 w-4" />
+                          </a>
+                        )}
+                        {inboxUrl && (
+                          <a
+                            href={inboxUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center justify-center rounded-lg border border-indigo-200 dark:border-indigo-900/70 bg-indigo-50/70 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 min-h-[38px] min-w-[38px]"
+                            aria-label="Meta Inbox"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setPeekLead(lead)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 min-h-[38px] text-xs font-medium text-slate-700 dark:text-slate-200"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          <span>{isAr ? 'معاينة' : 'Peek'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onSelectLead(lead.id)}
+                          className="inline-flex items-center justify-center rounded-lg bg-[#0F1E3D] dark:bg-blue-600 text-white min-h-[38px] min-w-[38px]"
+                          aria-label={isAr ? 'فتح الملف' : 'Open profile'}
+                        >
+                          <ArrowUpRight className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Desktop Table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-start border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 text-[11px] uppercase tracking-wide font-semibold text-slate-500 dark:text-slate-400">
                   {canManage && (
@@ -896,20 +1077,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               </tbody>
             </table>
           </div>
+          </>
         )}
 
         {/* Pagination */}
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 text-xs text-slate-600 dark:text-slate-400">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 sm:px-4 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/30 text-xs text-slate-600 dark:text-slate-400">
           <div className="tabular-nums">
             {isAr ? `إجمالي السجلات: ${total}` : `Total records: ${total}`} ·{' '}
             {isAr ? `صفحة ${page} من ${totalPages}` : `Page ${page} of ${totalPages}`}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               disabled={page <= 1}
               onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 sm:p-1.5 flex items-center justify-center disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              aria-label="Previous page"
             >
               {isAr ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
             </button>
@@ -917,7 +1100,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               type="button"
               disabled={page >= totalPages}
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-1.5 disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 min-h-[40px] min-w-[40px] sm:min-h-0 sm:min-w-0 sm:p-1.5 flex items-center justify-center disabled:opacity-40 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+              aria-label="Next page"
             >
               {isAr ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
             </button>
@@ -925,9 +1109,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
         </div>
       </div>
 
-      {/* Smooth Slide-Over Lead Quick-View Drawer */}
+      {/* Smooth Bottom-Sheet (Mobile) / Slide-Over (Desktop) Lead Quick-View */}
       {peekLead && (
-        <div className="fixed inset-0 z-50 flex justify-end">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-stretch sm:justify-end">
           <div
             className="fixed inset-0 bg-slate-950/45 backdrop-blur-[1px] transition-opacity"
             onClick={() => setPeekLead(null)}
@@ -936,10 +1120,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
           <aside
             aria-label={peekLead.full_name}
-            className="relative z-10 w-full max-w-lg h-full bg-white dark:bg-slate-900 border-s border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col crm-drawer-enter"
+            className="relative z-10 w-full sm:max-w-lg h-[90dvh] sm:h-full rounded-t-2xl sm:rounded-none bg-white dark:bg-slate-900 border-t sm:border-t-0 sm:border-s border-slate-200 dark:border-slate-800 shadow-2xl flex flex-col crm-sheet-enter overflow-hidden"
           >
+            {/* Mobile Sheet Drag Handle */}
+            <div className="sm:hidden flex justify-center pt-2.5 pb-1 bg-slate-50/70 dark:bg-slate-950/60">
+              <span className="h-1 w-10 rounded-full bg-slate-300 dark:bg-slate-700" aria-hidden="true" />
+            </div>
+
             {/* Drawer Header */}
-            <div className="p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
+            <div className="p-4 sm:p-5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-start gap-3.5 min-w-0">
                   <div
@@ -1169,12 +1358,12 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             </div>
 
             {/* Sticky Drawer Footer Actions */}
-            <div className="p-4 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 flex flex-wrap items-center justify-between gap-2">
+            <div className="p-3.5 sm:p-4 pb-safe border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-950/80 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
                 {peekPhone && (
                   <a
                     href={`tel:${peekPhone}`}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 px-3 py-2 text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 px-3 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors"
                   >
                     <Phone className="h-3.5 w-3.5" />
                     <span>{isAr ? 'اتصال' : 'Call'}</span>
@@ -1185,7 +1374,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     href={`https://wa.me/${peekWhatsappDigits}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-3 py-2 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-3 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
                   >
                     <MessageSquare className="h-3.5 w-3.5" />
                     <span>WhatsApp</span>
@@ -1194,7 +1383,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 {peekLead.email && (
                   <a
                     href={`mailto:${peekLead.email}`}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 px-2.5 py-2 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                    className="inline-flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 min-h-[42px] min-w-[42px] sm:min-h-0 sm:min-w-0 sm:px-2.5 sm:py-2 text-xs font-medium hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                     title={t.sendEmail}
                   >
                     <Mail className="h-3.5 w-3.5" />
@@ -1205,7 +1394,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     href={peekInboxUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-2.5 py-2 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
+                    className="inline-flex items-center justify-center rounded-lg border border-indigo-200 dark:border-indigo-900 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 min-h-[42px] min-w-[42px] sm:min-h-0 sm:min-w-0 sm:px-2.5 sm:py-2 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
                     title="Meta Inbox"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
@@ -1220,7 +1409,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   setPeekLead(null);
                   onSelectLead(id);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors"
+                className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-4 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold text-white transition-colors"
               >
                 <span>{isAr ? 'فتح الملف الكامل' : 'Open Full Profile'}</span>
                 <ArrowUpRight className="h-3.5 w-3.5" />

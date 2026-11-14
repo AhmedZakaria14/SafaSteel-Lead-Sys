@@ -105,7 +105,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         : analytics.charts.monthlyTrend.map((d) => ({ label: d.month, count: d.count }));
 
   return (
-    <div className="space-y-6 crm-animate-enter">
+    <div className="space-y-4 sm:space-y-6 crm-animate-enter">
       {/* Live Global Lead Search Bar in Dashboard */}
       {businessId && (
         <GlobalLeadSearch
@@ -117,41 +117,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         />
       )}
 
-      {/* Primary KPI Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Primary KPI Row (2 columns on phones for compact above-the-fold layout) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {primaryKpis.map((kpi) => {
           const Icon = kpi.icon;
           return (
             <div
               key={kpi.label}
-              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5"
+              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3.5 sm:p-5"
             >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-500 dark:text-slate-400">{kpi.label}</span>
-                <Icon className={`h-4 w-4 ${kpi.tone}`} />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
+                  {kpi.label}
+                </span>
+                <Icon className={`h-4 w-4 shrink-0 ${kpi.tone}`} />
               </div>
-              <div className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums">
+              <div className="mt-1.5 sm:mt-2 text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums">
                 {kpi.value.toLocaleString()}
               </div>
-              <div className="mt-1.5 text-xs text-slate-500 dark:text-slate-400 tabular-nums">{kpi.sub}</div>
+              <div className="mt-1 sm:mt-1.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 tabular-nums line-clamp-1">
+                {kpi.sub}
+              </div>
             </div>
           );
         })}
       </div>
 
       {/* Secondary Operational Metrics Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {secondaryKpis.map((item) => (
           <button
             key={item.label}
             type="button"
             onClick={item.label === t.upcomingFollowUps || item.label === t.overdueFollowUps ? onNavigateFollowUps : onNavigateLeads}
-            className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 text-start hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
+            className="flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 sm:px-4 py-3 min-h-[60px] text-start hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
           >
-            <div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">{item.label}</div>
+            <div className="min-w-0">
+              <div className="text-[11px] sm:text-xs text-slate-500 dark:text-slate-400 truncate">{item.label}</div>
               <div
-                className={`mt-1 text-lg font-semibold tabular-nums ${
+                className={`mt-1 text-base sm:text-lg font-semibold tabular-nums ${
                   item.alert ? 'text-red-600 dark:text-red-400' : 'text-slate-900 dark:text-slate-100'
                 }`}
               >
@@ -159,18 +163,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
             {item.alert ? (
-              <AlertCircle className="h-4 w-4 text-red-500" />
+              <AlertCircle className="h-4 w-4 text-red-500 shrink-0" />
             ) : (
-              <ArrowUpRight className="h-4 w-4 text-slate-400" />
+              <ArrowUpRight className="h-4 w-4 text-slate-400 shrink-0" />
             )}
           </button>
         ))}
       </div>
 
       {/* Acquisition Trend & Status Distribution */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 crm-cv-auto">
+        <div className="lg:col-span-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 sm:mb-5">
             <div>
               <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
                 {trendMode === 'daily' ? t.dailyAcquisition : trendMode === 'weekly' ? t.weeklyTrends : t.monthlyTrends}
@@ -185,7 +189,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   key={mode}
                   type="button"
                   onClick={() => setTrendMode(mode)}
-                  className={`px-3 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
+                  className={`px-3 py-1.5 min-h-[34px] text-xs font-medium rounded-md transition-colors whitespace-nowrap ${
                     trendMode === mode
                       ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-slate-100 shadow-xs'
                       : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
@@ -197,9 +201,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          <div className="h-64 w-full" dir="ltr">
+          <div className="h-52 sm:h-64 w-full" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendData} margin={{ top: 8, right: 12, left: -16, bottom: 0 }}>
+              <AreaChart data={trendData} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="leadAreaGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#2563EB" stopOpacity={0.22} />
@@ -207,8 +211,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" strokeOpacity={0.5} />
-                <XAxis dataKey="label" tick={{ fontSize: 11, fill: '#64748B' }} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#64748B' }} />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#64748B' }} />
+                <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: '#64748B' }} />
                 <Tooltip />
                 <Area type="monotone" dataKey="count" stroke="#2563EB" strokeWidth={2} fill="url(#leadAreaGrad)" />
               </AreaChart>
@@ -216,9 +220,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
-          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{t.statusDistribution}</h3>
-          <div className="h-48 w-full" dir="ltr">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3 sm:mb-4">{t.statusDistribution}</h3>
+          <div className="h-44 sm:h-48 w-full" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -227,8 +231,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   nameKey={isAr ? 'nameAr' : 'nameEn'}
                   cx="50%"
                   cy="50%"
-                  innerRadius={48}
-                  outerRadius={76}
+                  innerRadius={44}
+                  outerRadius={72}
                   paddingAngle={2}
                 >
                   {analytics.charts.statusDistribution.map((entry) => (
@@ -254,8 +258,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       </div>
 
       {/* Funnel, Campaign Performance, Employee Performance */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6 crm-cv-auto">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{t.conversionFunnel}</h3>
           <div className="space-y-3">
             {analytics.charts.funnel.map((step) => {
@@ -289,14 +293,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{t.campaignPerformance}</h3>
-          <div className="h-60 w-full" dir="ltr">
+          <div className="h-56 sm:h-60 w-full" dir="ltr">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={analytics.charts.byCampaign.slice(0, 6)} layout="vertical" margin={{ left: 10, right: 16 }}>
+              <BarChart data={analytics.charts.byCampaign.slice(0, 6)} layout="vertical" margin={{ left: 0, right: 12 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" strokeOpacity={0.4} />
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#64748B' }} />
-                <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: '#64748B' }} />
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 10, fill: '#64748B' }} />
+                <YAxis type="category" dataKey="name" width={88} tick={{ fontSize: 10, fill: '#64748B' }} />
                 <Tooltip />
                 <Bar dataKey="total" fill="#2563EB" radius={[0, 4, 4, 0]} />
                 <Bar dataKey="converted" fill="#059669" radius={[0, 4, 4, 0]} />
@@ -305,7 +309,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">{t.employeePerformance}</h3>
           <div className="space-y-3">
             {analytics.charts.byEmployee.map((emp) => {

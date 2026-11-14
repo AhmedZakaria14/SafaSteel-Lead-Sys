@@ -43,11 +43,11 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   return (
     <ToastContext.Provider value={{ notify }}>
       {children}
-      <div className="fixed bottom-4 end-4 z-50 flex flex-col gap-2 max-w-sm w-full pointer-events-none px-4 sm:px-0">
+      <div className="fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] md:bottom-4 inset-x-3 sm:inset-x-auto sm:end-4 z-50 flex flex-col gap-2 sm:max-w-sm sm:w-full pointer-events-none">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto flex items-center justify-between gap-2.5 rounded-xl border px-4 py-3 text-xs sm:text-sm shadow-lg bg-white dark:bg-slate-900 crm-animate-enter ${
+            className={`pointer-events-auto flex items-center justify-between gap-2.5 rounded-xl border px-3.5 sm:px-4 py-3 text-xs sm:text-sm shadow-lg bg-white dark:bg-slate-900 crm-animate-enter ${
               t.variant === 'success'
                 ? 'border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
                 : t.variant === 'error'
@@ -69,7 +69,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     t.onAction?.();
                     dismiss(t.id);
                   }}
-                  className="inline-flex items-center gap-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap"
+                  className="inline-flex items-center gap-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 text-[11px] font-semibold transition-colors whitespace-nowrap min-h-[32px]"
                 >
                   <span>{t.actionLabel}</span>
                   <ArrowUpRight className="h-3 w-3" />
@@ -78,7 +78,8 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               <button
                 type="button"
                 onClick={() => dismiss(t.id)}
-                className="rounded p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="rounded p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                aria-label="Dismiss"
               >
                 <X className="h-3.5 w-3.5" />
               </button>

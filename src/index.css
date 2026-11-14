@@ -7,6 +7,12 @@
     --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
   }
 
+  html {
+    overflow-x: clip;
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
   html[dir="ltr"] {
     --font-sans: "Plus Jakarta Sans", "IBM Plex Sans Arabic", system-ui, -apple-system, sans-serif;
   }
@@ -14,6 +20,18 @@
   body {
     font-family: var(--font-sans);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow-x: clip;
+    overscroll-behavior-y: contain;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button,
+  a,
+  select,
+  input,
+  textarea,
+  [role="button"] {
+    touch-action: manipulation;
   }
 
   .tabular-nums {
@@ -21,122 +39,111 @@
   }
 }
 
-/* Official Google Sign-In Material Button Styling */
-.gsi-material-button {
-  -moz-user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-  -webkit-appearance: none;
-  background-color: #ffffff;
-  background-image: none;
-  border: 1px solid #cbd5e1;
-  border-radius: 8px;
-  box-sizing: border-box;
-  color: #0f172a;
-  cursor: pointer;
-  font-family: var(--font-sans);
-  font-size: 14px;
-  font-weight: 500;
-  height: 42px;
-  letter-spacing: 0.15px;
-  outline: none;
-  overflow: hidden;
-  padding: 0 16px;
-  position: relative;
-  text-align: center;
-  transition: background-color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-  vertical-align: middle;
-  white-space: nowrap;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+/* Mobile safe-area utilities & smooth scroll helpers */
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
 }
 
-.dark .gsi-material-button {
-  background-color: #111827;
-  border-color: #334155;
-  color: #f8fafc;
+.pt-safe {
+  padding-top: env(safe-area-inset-top);
 }
 
-.gsi-material-button:hover:not(:disabled) {
-  border-color: #94a3b8;
-  background-color: #f8fafc;
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
-.dark .gsi-material-button:hover:not(:disabled) {
-  background-color: #1e293b;
-  border-color: #475569;
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
-.gsi-material-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.6;
+.crm-cv-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 132px;
 }
 
-.gsi-material-button .gsi-material-button-content-wrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  height: 100%;
-  width: 100%;
-}
-
-.gsi-material-button .gsi-material-button-icon {
-  height: 18px;
-  width: 18px;
-  min-width: 18px;
-}
-
-/* Smooth compositor-only UI transitions */
+/* Smooth GPU-composited UI transitions */
 @keyframes crmFadeSlideIn {
   from {
     opacity: 0;
-    transform: translateY(6px);
+    transform: translate3d(0, 6px, 0);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes crmSheetSlideUp {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
 }
 
 @keyframes crmDrawerSlideRtl {
   from {
     opacity: 0;
-    transform: translateX(-20px);
+    transform: translate3d(-20px, 0, 0);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
 @keyframes crmDrawerSlideLtr {
   from {
     opacity: 0;
-    transform: translateX(20px);
+    transform: translate3d(20px, 0, 0);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
 .crm-animate-enter {
-  animation: crmFadeSlideIn 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: crmFadeSlideIn 180ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
 }
 
 .crm-drawer-enter {
   animation: crmDrawerSlideLtr 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
 }
 
 html[dir="rtl"] .crm-drawer-enter {
   animation: crmDrawerSlideRtl 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.crm-sheet-enter {
+  animation: crmSheetSlideUp 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+@media (min-width: 640px) {
+  .crm-sheet-enter {
+    animation: crmDrawerSlideLtr 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  html[dir="rtl"] .crm-sheet-enter {
+    animation: crmDrawerSlideRtl 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
   .crm-animate-enter,
-  .crm-drawer-enter {
+  .crm-drawer-enter,
+  .crm-sheet-enter {
     animation: none !important;
   }
 }

@@ -260,30 +260,31 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const visibleCustomFields = customFields.filter((cf) => cf.field_key !== '_sheet_hash');
 
   return (
-    <div className="space-y-6 crm-animate-enter">
+    <div className="space-y-4 sm:space-y-6 crm-animate-enter">
       {/* Hero Header + Interactive Stage Progress */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-        <div className="p-5 sm:p-6">
-          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-5">
-            <div className="flex items-start gap-4 min-w-0">
+        <div className="p-4 sm:p-6">
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 sm:gap-5">
+            <div className="flex items-start gap-3 sm:gap-4 min-w-0">
               <button
                 type="button"
                 onClick={onBack}
-                className="mt-1 rounded-lg border border-slate-200 dark:border-slate-700 p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
+                className="mt-0.5 rounded-lg border border-slate-200 dark:border-slate-700 min-h-[42px] min-w-[42px] sm:min-h-0 sm:min-w-0 sm:p-2 flex items-center justify-center text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors shrink-0"
                 title={isAr ? 'العودة لقائمة العملاء' : 'Back to Leads'}
+                aria-label={isAr ? 'العودة لقائمة العملاء' : 'Back to Leads'}
               >
                 {isAr ? <ArrowRight className="h-4 w-4" /> : <ArrowLeft className="h-4 w-4" />}
               </button>
 
               <div
-                className="h-12 w-12 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0 shadow-xs"
+                className="h-11 w-11 sm:h-12 sm:w-12 rounded-xl flex items-center justify-center text-sm font-bold text-white shrink-0 shadow-xs"
                 style={{ backgroundColor: currentStage?.color || '#0F1E3D' }}
               >
                 {getInitials(lead.full_name)}
               </div>
 
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] sm:text-xs text-slate-500 dark:text-slate-400">
                   <span className="font-mono font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
                     {lead.lead_code}
                   </span>
@@ -311,7 +312,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                   )}
                 </div>
 
-                <h2 className="mt-1 text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 break-words">
+                <h2 className="mt-1 text-lg sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 break-words">
                   {lead.full_name}
                 </h2>
 
@@ -335,12 +336,12 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
               </div>
             </div>
 
-            {/* Quick Actions */}
-            <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Quick Actions (Clean 2-col grid on mobile, inline flex on desktop) */}
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2 shrink-0">
               {primaryPhone && (
                 <a
                   href={`tel:${primaryPhone}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 dark:border-blue-900/70 bg-blue-50/70 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-3.5 py-2 text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-all duration-150 whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-blue-200 dark:border-blue-900/70 bg-blue-50/70 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-3.5 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-all duration-150 whitespace-nowrap"
                 >
                   <Phone className="h-3.5 w-3.5" />
                   <span>{t.callCustomer}</span>
@@ -351,7 +352,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                   href={`https://wa.me/${whatsappDigits}`}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 px-3.5 py-2 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all duration-150 whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 px-3.5 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all duration-150 whitespace-nowrap"
                 >
                   <MessageSquare className="h-3.5 w-3.5" />
                   <span>{t.openWhatsApp}</span>
@@ -362,7 +363,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                   href={inboxUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900/70 bg-indigo-50/70 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 px-3.5 py-2 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all duration-150 whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-indigo-200 dark:border-indigo-900/70 bg-indigo-50/70 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 px-3.5 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all duration-150 whitespace-nowrap"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                   <span>{isAr ? 'محادثة Meta Inbox' : 'Meta Inbox'}</span>
@@ -371,7 +372,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
               {lead.email && (
                 <a
                   href={`mailto:${lead.email}`}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
                 >
                   <Mail className="h-3.5 w-3.5 text-slate-500" />
                   <span>{t.sendEmail}</span>
@@ -380,7 +381,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
               <button
                 type="button"
                 onClick={() => window.print()}
-                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white transition-colors whitespace-nowrap"
+                className="col-span-2 sm:col-span-1 inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-3.5 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold text-white transition-colors whitespace-nowrap"
               >
                 <Printer className="h-3.5 w-3.5" />
                 <span>{t.printBrief}</span>
@@ -400,7 +401,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
 
         {/* Interactive Pipeline Stage Stepper */}
         {stages.length > 0 && (
-          <div className="px-5 sm:px-6 py-3 bg-slate-50/80 dark:bg-slate-950/60 border-t border-slate-200 dark:border-slate-800 overflow-x-auto">
+          <div className="px-4 sm:px-6 py-2.5 sm:py-3 bg-slate-50/80 dark:bg-slate-950/60 border-t border-slate-200 dark:border-slate-800 overflow-x-auto no-scrollbar">
             <div className="flex items-center gap-1.5 min-w-max">
               {stages.map((stage, idx) => {
                 const isActive = stage.id === lead.status_id;
@@ -412,7 +413,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                     type="button"
                     disabled={Boolean(updatingStageId)}
                     onClick={() => handleStatusChange(stage.id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-150 whitespace-nowrap border ${
+                    className={`px-3 min-h-[38px] sm:min-h-0 sm:py-1.5 rounded-lg text-xs font-medium transition-all duration-150 whitespace-nowrap border ${
                       isActive
                         ? 'text-white shadow-xs border-transparent'
                         : isPast
@@ -599,7 +600,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
           </div>
 
           {/* Internal Notes */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{t.internalNotes}</h3>
             <form onSubmit={handleAddNote} className="flex flex-col sm:flex-row gap-2">
               <input
@@ -607,11 +608,11 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
                 placeholder={isAr ? 'اكتب ملاحظة داخلية حول مكالمة أو عرض سعر...' : 'Add internal note about call or quote...'}
-                className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                className="flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3.5 py-2.5 min-h-[44px] sm:min-h-0 text-base sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors whitespace-nowrap"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-4 min-h-[44px] sm:min-h-0 sm:py-2 text-xs font-semibold text-white transition-colors whitespace-nowrap"
               >
                 <Send className="h-3.5 w-3.5" />
                 <span>{t.addNote}</span>
@@ -641,7 +642,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
           </div>
 
           {/* Follow-up Tasks */}
-          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5">
+          <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-3">{t.followUpTasks}</h3>
             <form onSubmit={handleScheduleFollowUp} className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               <input
@@ -649,17 +650,17 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                 value={followUpTitle}
                 onChange={(e) => setFollowUpTitle(e.target.value)}
                 placeholder={isAr ? 'عنوان المتابعة...' : 'Follow-up task title...'}
-                className="sm:col-span-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
+                className="sm:col-span-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm"
               />
               <input
                 type="datetime-local"
                 value={followUpDue}
                 onChange={(e) => setFollowUpDue(e.target.value)}
-                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm"
+                className="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm"
               />
               <button
                 type="submit"
-                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors"
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-4 min-h-[44px] sm:min-h-0 sm:py-2 text-xs font-semibold text-white transition-colors"
               >
                 <CalendarPlus className="h-3.5 w-3.5" />
                 <span>{t.scheduleFollowUp}</span>

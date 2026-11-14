@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
   LayoutDashboard,
   Users,
@@ -27,6 +27,8 @@ import {
   Volume2,
   VolumeX,
   Crown,
+  Search,
+  MoreHorizontal,
 } from 'lucide-react';
 import {
   AnalyticsResponse,
@@ -61,17 +63,51 @@ import {
 import { ToastProvider, useToast } from './components/ui/ToastProvider';
 import { LoginScreen } from './components/ui/LoginScreen';
 import { GlobalLeadSearch } from './components/ui/GlobalLeadSearch';
-import { WorkspaceWizardModal } from './components/modals/WorkspaceWizardModal';
-import { CreateLeadModal } from './components/modals/CreateLeadModal';
-import { DashboardView } from './components/views/DashboardView';
-import { LeadsView } from './components/views/LeadsView';
-import { LeadDetailView } from './components/views/LeadDetailView';
-import { PipelineView } from './components/views/PipelineView';
-import { FollowUpsView } from './components/views/FollowUpsView';
-import { CampaignsView } from './components/views/CampaignsView';
-import { TeamView } from './components/views/TeamView';
-import { IntegrationsView } from './components/views/IntegrationsView';
-import { SettingsView } from './components/views/SettingsView';
+
+const WorkspaceWizardModal = lazy(() =>
+  import('./components/modals/WorkspaceWizardModal').then((m) => ({ default: m.WorkspaceWizardModal }))
+);
+const CreateLeadModal = lazy(() =>
+  import('./components/modals/CreateLeadModal').then((m) => ({ default: m.CreateLeadModal }))
+);
+const DashboardView = lazy(() =>
+  import('./components/views/DashboardView').then((m) => ({ default: m.DashboardView }))
+);
+const LeadsView = lazy(() =>
+  import('./components/views/LeadsView').then((m) => ({ default: m.LeadsView }))
+);
+const LeadDetailView = lazy(() =>
+  import('./components/views/LeadDetailView').then((m) => ({ default: m.LeadDetailView }))
+);
+const PipelineView = lazy(() =>
+  import('./components/views/PipelineView').then((m) => ({ default: m.PipelineView }))
+);
+const FollowUpsView = lazy(() =>
+  import('./components/views/FollowUpsView').then((m) => ({ default: m.FollowUpsView }))
+);
+const CampaignsView = lazy(() =>
+  import('./components/views/CampaignsView').then((m) => ({ default: m.CampaignsView }))
+);
+const TeamView = lazy(() =>
+  import('./components/views/TeamView').then((m) => ({ default: m.TeamView }))
+);
+const IntegrationsView = lazy(() =>
+  import('./components/views/IntegrationsView').then((m) => ({ default: m.IntegrationsView }))
+);
+const SettingsView = lazy(() =>
+  import('./components/views/SettingsView').then((m) => ({ default: m.SettingsView }))
+);
+
+const ViewSkeleton: React.FC = () => (
+  <div className="space-y-4 animate-pulse">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="h-24 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800" />
+      ))}
+    </div>
+    <div className="h-72 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800" />
+  </div>
+);
 
 type NavTab =
   | 'dashboard'
@@ -90,6 +126,7 @@ function LeadFlowAppInner() {
   const [theme, setTheme] = useState<ThemeMode>('light');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   const [authUser, setAuthUser] = useState<UserProfile | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -808,27 +845,53 @@ function LeadFlowAppInner() {
       {/* Mobile Drawer */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-50 md:hidden flex">
-          <div className="w-72 bg-white dark:bg-slate-900 border-e border-slate-200 dark:border-slate-800 h-full flex flex-col p-4 space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="font-bold text-[#0F1E3D] dark:text-white">{t.brandName}</span>
-              <button type="button" onClick={() => setMobileMenuOpen(false)} className="p-1.5">
+          <div className="w-[84vw] max-w-xs bg-white dark:bg-slate-900 border-e border-slate-200 dark:border-slate-800 h-full flex flex-col pt-safe pb-safe crm-drawer-enter shadow-2xl">
+            <div className="px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-bold text-sm text-[#0F1E3D] dark:text-white truncate">{t.brandName}</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate font-mono" dir="ltr">
+                  {authUser.username || authUser.full_name}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800"
+                aria-label="Close menu"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <select
-              value={activeBusinessId}
-              onChange={(e) => setActiveBusinessId(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-semibold"
-            >
-              {allBusinesses.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-            <nav className="space-y-1 flex-1">
+
+            <div className="p-3.5 border-b border-slate-100 dark:border-slate-800 space-y-2.5">
+              <select
+                value={activeBusinessId}
+                onChange={(e) => setActiveBusinessId(e.target.value)}
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 min-h-[44px] text-base sm:text-xs font-semibold"
+              >
+                {allBusinesses.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setShowWorkspaceModal(true);
+                }}
+                className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 min-h-[42px] text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{t.createWorkspace}</span>
+              </button>
+            </div>
+
+            <nav className="p-3 space-y-1 flex-1 overflow-y-auto">
               {navItems.map((item) => {
                 const Icon = item.icon;
+                const active = activeTab === item.id && !selectedLeadId;
                 return (
                   <button
                     key={item.id}
@@ -836,43 +899,90 @@ function LeadFlowAppInner() {
                     onClick={() => {
                       setActiveTab(item.id);
                       setSelectedLeadId(null);
+                      syncLeadUrl(null);
                       setMobileMenuOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium ${
-                      activeTab === item.id
+                    className={`w-full flex items-center gap-3 rounded-lg px-3.5 min-h-[44px] text-sm font-medium transition-colors ${
+                      active
                         ? 'bg-[#0F1E3D] text-white dark:bg-blue-600'
-                        : 'text-slate-700 dark:text-slate-300'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
                     }`}
                   >
-                    <Icon className="h-4 w-4" />
+                    <Icon className="h-4 w-4 shrink-0" />
                     <span>{item.label}</span>
                   </button>
                 );
               })}
             </nav>
+
+            {/* Quick Mobile Preferences & Logout */}
+            <div className="p-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 space-y-2.5">
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 min-h-[42px] text-xs font-medium"
+                >
+                  <Languages className="h-3.5 w-3.5" />
+                  <span>{lang === 'ar' ? 'EN' : 'عربي'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTheme((m) => (m === 'light' ? 'dark' : 'light'))}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 min-h-[42px] text-xs font-medium"
+                >
+                  {theme === 'light' ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+                  <span>{theme === 'light' ? (isAr ? 'داكن' : 'Dark') : isAr ? 'فاتح' : 'Light'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleToggleSound}
+                  className={`inline-flex items-center justify-center gap-1 rounded-lg border min-h-[42px] text-xs font-medium ${
+                    soundEnabled
+                      ? 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                      : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-500'
+                  }`}
+                >
+                  {soundEnabled ? <Volume2 className="h-3.5 w-3.5" /> : <VolumeX className="h-3.5 w-3.5" />}
+                  <span>{soundEnabled ? (isAr ? 'الصوت' : 'Sound') : isAr ? 'مكتوم' : 'Muted'}</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  handleLogout();
+                }}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50/70 dark:bg-red-950/30 min-h-[44px] text-xs font-semibold text-red-700 dark:text-red-300"
+              >
+                <LogOut className="h-4 w-4" />
+                <span>{t.signOut}</span>
+              </button>
+            </div>
           </div>
-          <div className="flex-1 bg-slate-950/50" onClick={() => setMobileMenuOpen(false)} />
+          <div className="flex-1 bg-slate-950/50 backdrop-blur-[1px]" onClick={() => setMobileMenuOpen(false)} />
         </div>
       )}
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Top Bar */}
-        <header className="h-16 px-4 sm:px-6 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0 shrink-0">
+        {/* Top Bar (Compact Sticky on Mobile <= 56px) */}
+        <header className="sticky top-0 z-30 h-14 sm:h-16 px-3 sm:px-6 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md flex items-center justify-between gap-2 sm:gap-4">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1 sm:flex-initial">
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="md:hidden rounded-lg p-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+              className="md:hidden min-h-[42px] min-w-[42px] flex items-center justify-center rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
+              aria-label="Open menu"
             >
               <Menu className="h-5 w-5" />
             </button>
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate max-w-[200px]">
+            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 truncate">
               {activeBusiness ? activeBusiness.name : t.brandName}
             </div>
           </div>
 
-          {/* Global Live Customer Search in Topbar */}
+          {/* Global Live Customer Search in Desktop Topbar */}
           {activeBusiness && (
             <div className="hidden lg:block flex-1 max-w-md mx-auto">
               <GlobalLeadSearch
@@ -889,11 +999,27 @@ function LeadFlowAppInner() {
             </div>
           )}
 
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+            {/* Mobile Quick Search Toggle */}
+            {activeBusiness && (
+              <button
+                type="button"
+                onClick={() => setMobileSearchOpen((v) => !v)}
+                className={`lg:hidden min-h-[42px] min-w-[42px] flex items-center justify-center rounded-lg border transition-colors ${
+                  mobileSearchOpen
+                    ? 'border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
+                aria-label={isAr ? 'بحث سريع' : 'Quick search'}
+              >
+                {mobileSearchOpen ? <X className="h-4 w-4" /> : <Search className="h-4 w-4" />}
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap"
+              className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-2.5 py-1.5 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap"
               title="Switch language"
             >
               <Languages className="h-3.5 w-3.5" />
@@ -903,17 +1029,17 @@ function LeadFlowAppInner() {
             <button
               type="button"
               onClick={() => setTheme((m) => (m === 'light' ? 'dark' : 'light'))}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 p-2 hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="hidden sm:flex rounded-lg border border-slate-200 dark:border-slate-700 p-2 hover:bg-slate-50 dark:hover:bg-slate-800"
               aria-label="Toggle theme"
             >
               {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </button>
 
-            {/* Notification Sound Toggle */}
+            {/* Notification Sound Toggle (Desktop/Tablet header; mobile also inside menu & bell popover) */}
             <button
               type="button"
               onClick={handleToggleSound}
-              className={`rounded-lg border p-2 transition-colors ${
+              className={`hidden sm:flex rounded-lg border p-2 transition-colors ${
                 soundEnabled
                   ? 'border-blue-200 dark:border-blue-800/80 bg-blue-50/70 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100/70 dark:hover:bg-blue-950/50'
                   : 'border-slate-200 dark:border-slate-700 text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800'
@@ -937,7 +1063,7 @@ function LeadFlowAppInner() {
               <button
                 type="button"
                 onClick={() => setShowNotifMenu((v) => !v)}
-                className="relative rounded-lg border border-slate-200 dark:border-slate-700 p-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                className="relative min-h-[42px] min-w-[42px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 sm:p-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
                 aria-label={t.notifications}
               >
                 {unreadCount > 0 ? <BellRing className="h-4 w-4 text-blue-600 dark:text-blue-400" /> : <Bell className="h-4 w-4" />}
@@ -949,7 +1075,7 @@ function LeadFlowAppInner() {
               </button>
 
               {showNotifMenu && (
-                <div className="absolute end-0 mt-2 w-80 sm:w-96 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl z-40 overflow-hidden crm-animate-enter">
+                <div className="fixed inset-x-3 top-16 sm:absolute sm:inset-x-auto sm:end-0 sm:top-auto sm:mt-2 sm:w-96 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-2xl z-50 overflow-hidden crm-animate-enter">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-800 text-xs">
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-slate-900 dark:text-slate-100">{t.notifications}</span>
@@ -959,7 +1085,7 @@ function LeadFlowAppInner() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex items-center gap-2">
                       <button
                         type="button"
                         onClick={handleToggleSound}
@@ -1037,7 +1163,7 @@ function LeadFlowAppInner() {
                     )}
                   </div>
 
-                  <div className="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+                  <div className="max-h-[60dvh] sm:max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
                     {notifications.length === 0 ? (
                       <div className="p-8 text-center text-xs text-slate-400">{t.noNotifications}</div>
                     ) : (
@@ -1097,8 +1223,9 @@ function LeadFlowAppInner() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="rounded-lg border border-slate-200 dark:border-slate-700 p-2 text-slate-500 hover:text-red-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                className="min-h-[42px] min-w-[42px] sm:min-h-0 sm:min-w-0 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 sm:p-2 text-slate-500 hover:text-red-600 hover:bg-slate-50 dark:hover:bg-slate-800"
                 title={t.signOut}
+                aria-label={t.signOut}
               >
                 <LogOut className="h-4 w-4" />
               </button>
@@ -1106,36 +1233,57 @@ function LeadFlowAppInner() {
           </div>
         </header>
 
-        {/* Live Sheet Sync Status Bar */}
+        {/* Expandable Mobile/Tablet Search Panel */}
+        {mobileSearchOpen && activeBusiness && (
+          <div className="lg:hidden px-3 py-2.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 crm-animate-enter">
+            <GlobalLeadSearch
+              lang={lang}
+              businessId={activeBusiness.id}
+              variant="topbar"
+              onSelectLead={(id) => {
+                setMobileSearchOpen(false);
+                navigateToLead(id);
+              }}
+              onViewAllLeads={() => {
+                setMobileSearchOpen(false);
+                setSelectedLeadId(null);
+                syncLeadUrl(null);
+                setActiveTab('leads');
+              }}
+            />
+          </div>
+        )}
+
+        {/* Live Sheet Sync Status Bar (Compact on Mobile, non-sticky so viewport stays open) */}
         {activeBusiness && (
-          <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border-b border-emerald-200/80 dark:border-emerald-900/60 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs text-emerald-950 dark:text-emerald-200">
-            <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+          <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border-b border-emerald-200/80 dark:border-emerald-900/60 px-3 sm:px-6 py-1.5 sm:py-2 flex items-center justify-between gap-2 text-[11px] sm:text-xs text-emerald-950 dark:text-emerald-200">
+            <div className="flex items-center gap-2 min-w-0 flex-1">
               <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
               <span className="font-semibold truncate">
                 {sheetStatus?.spreadsheetName || sheetStatus?.attachedSheetName || activeBusiness.name}
               </span>
-              <span className="text-emerald-700/80 dark:text-emerald-300/80">·</span>
-              <span className="tabular-nums">
+              <span className="text-emerald-700/80 dark:text-emerald-300/80 hidden sm:inline">·</span>
+              <span className="tabular-nums hidden sm:inline">
                 {sseConnected
                   ? isAr ? 'مزامنة لحظية مفعلة' : 'Live Sync Active'
                   : isAr ? 'جاري الاتصال بالمزامنة...' : 'Connecting live sync...'}
               </span>
               {sheetStatus?.lastSyncAt && (
                 <>
-                  <span className="text-emerald-700/80 dark:text-emerald-300/80 hidden sm:inline">·</span>
-                  <span className="text-emerald-800/80 dark:text-emerald-300/80 tabular-nums hidden sm:inline">
+                  <span className="text-emerald-700/80 dark:text-emerald-300/80 hidden md:inline">·</span>
+                  <span className="text-emerald-800/80 dark:text-emerald-300/80 tabular-nums hidden md:inline">
                     {isAr ? 'آخر تحديث:' : 'Last sync:'}{' '}
                     {new Date(sheetStatus.lastSyncAt).toLocaleTimeString(isAr ? 'ar-EG' : 'en-US')}
                   </span>
                 </>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <button
                 type="button"
                 onClick={handleManualSheetSync}
                 disabled={syncingNow}
-                className="inline-flex items-center gap-1 rounded-md border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2.5 py-1 text-xs font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40 disabled:opacity-50"
+                className="inline-flex items-center gap-1 rounded-md border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2.5 py-1 min-h-[30px] text-[11px] sm:text-xs font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40 disabled:opacity-50"
               >
                 <RefreshCw className={`h-3 w-3 ${syncingNow ? 'animate-spin' : ''}`} />
                 <span>{t.syncNow}</span>
@@ -1143,7 +1291,7 @@ function LeadFlowAppInner() {
               <button
                 type="button"
                 onClick={() => setActiveTab('integrations')}
-                className="inline-flex items-center gap-1 font-semibold underline hover:text-emerald-700 dark:hover:text-emerald-300"
+                className="hidden sm:inline-flex items-center gap-1 font-semibold underline hover:text-emerald-700 dark:hover:text-emerald-300"
               >
                 <span>{isAr ? 'إعدادات الشيت' : 'Sheet Source'}</span>
               </button>
@@ -1151,7 +1299,7 @@ function LeadFlowAppInner() {
                 <button
                   type="button"
                   onClick={handleResetDemo}
-                  className="inline-flex items-center gap-1 text-emerald-800/80 dark:text-emerald-300/80 hover:underline"
+                  className="hidden sm:inline-flex items-center gap-1 text-emerald-800/80 dark:text-emerald-300/80 hover:underline"
                 >
                   <RotateCcw className="h-3 w-3" />
                   <span>{t.resetDemo}</span>
@@ -1162,136 +1310,191 @@ function LeadFlowAppInner() {
         )}
 
         {/* Main Viewport */}
-        <main className="flex-1 p-4 sm:p-6 max-w-[1440px] w-full mx-auto">
-          {!activeBusiness ? (
-            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-12 text-center max-w-lg mx-auto mt-10">
-              <Building2 className="h-10 w-10 mx-auto text-[#0F1E3D] dark:text-blue-400" />
-              <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-100">
-                {isAr ? 'مرحباً بك في LeadFlow CRM' : 'Welcome to LeadFlow CRM'}
-              </h2>
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-                {isAr
-                  ? 'أنشئ مساحة عمل لنشاطك التجاري أو تواصل مع المدير لتفعيل مساحة الصفا ستيل.'
-                  : 'Create a business workspace to start capturing, organizing, and converting leads.'}
-              </p>
-              <div className="mt-6 flex flex-wrap justify-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setShowWorkspaceModal(true)}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-5 py-2.5 text-sm font-medium text-white"
-                >
-                  <Plus className="h-4 w-4" />
-                  <span>{t.createWorkspace}</span>
-                </button>
+        <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 max-w-[1440px] w-full mx-auto">
+          <Suspense fallback={<ViewSkeleton />}>
+            {!activeBusiness ? (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 sm:p-12 text-center max-w-lg mx-auto mt-6 sm:mt-10">
+                <Building2 className="h-10 w-10 mx-auto text-[#0F1E3D] dark:text-blue-400" />
+                <h2 className="mt-4 text-lg font-bold text-slate-900 dark:text-slate-100">
+                  {isAr ? 'مرحباً بك في LeadFlow CRM' : 'Welcome to LeadFlow CRM'}
+                </h2>
+                <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+                  {isAr
+                    ? 'أنشئ مساحة عمل لنشاطك التجاري أو تواصل مع المدير لتفعيل مساحة الصفا ستيل.'
+                    : 'Create a business workspace to start capturing, organizing, and converting leads.'}
+                </p>
+                <div className="mt-6 flex flex-wrap justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowWorkspaceModal(true)}
+                    className="inline-flex items-center gap-2 rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-5 min-h-[44px] text-sm font-medium text-white"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>{t.createWorkspace}</span>
+                  </button>
+                </div>
               </div>
-            </div>
-          ) : selectedLeadId ? (
-            <LeadDetailView
-              lang={lang}
-              businessId={activeBusiness.id}
-              leadId={selectedLeadId}
-              userRole={effectiveRole}
-              stages={stages}
-              customFields={customFields}
-              members={members}
-              onBack={handleCloseLeadDetail}
-              onUpdated={() => setRefreshCounter((c) => c + 1)}
-              onNotify={notify}
-            />
-          ) : activeTab === 'dashboard' ? (
-            <DashboardView
-              lang={lang}
-              businessId={activeBusiness.id}
-              analytics={analytics}
-              loading={analyticsLoading}
-              onSelectLead={(id) => navigateToLead(id)}
-              onNavigateLeads={() => setActiveTab('leads')}
-              onNavigateFollowUps={() => setActiveTab('followups')}
-              onAddLead={() => setShowCreateLeadModal(true)}
-            />
-          ) : activeTab === 'leads' ? (
-            <LeadsView
-              lang={lang}
-              businessId={activeBusiness.id}
-              userRole={effectiveRole}
-              stages={stages}
-              customFields={customFields}
-              members={members}
-              onSelectLead={(id) => navigateToLead(id)}
-              onAddLead={() => setShowCreateLeadModal(true)}
-              onNotify={notify}
-              refreshTrigger={refreshCounter}
-            />
-          ) : activeTab === 'pipeline' ? (
-            <PipelineView
-              lang={lang}
-              businessId={activeBusiness.id}
-              userRole={effectiveRole}
-              stages={stages}
-              onSelectLead={(id) => navigateToLead(id)}
-              onStagesChanged={() => setRefreshCounter((c) => c + 1)}
-              onNotify={notify}
-            />
-          ) : activeTab === 'followups' ? (
-            <FollowUpsView
-              lang={lang}
-              businessId={activeBusiness.id}
-              onSelectLead={(id) => navigateToLead(id)}
-              onNotify={notify}
-            />
-          ) : activeTab === 'campaigns' ? (
-            <CampaignsView lang={lang} analytics={analytics} />
-          ) : activeTab === 'team' ? (
-            <TeamView
-              lang={lang}
-              business={activeBusiness}
-              userRole={effectiveRole}
-              currentUser={authUser}
-              members={members}
-              onRefresh={() => setRefreshCounter((c) => c + 1)}
-              onNotify={notify}
-            />
-          ) : activeTab === 'integrations' ? (
-            <IntegrationsView
-              lang={lang}
-              businessId={activeBusiness.id}
-              userRole={effectiveRole}
-              onLeadsUpdated={() => setRefreshCounter((c) => c + 1)}
-              onNotify={notify}
-            />
-          ) : (
-            <SettingsView
-              lang={lang}
-              business={activeBusiness}
-              userRole={effectiveRole}
-              customFields={customFields}
-              onRefreshBusiness={() => loadSessionAndWorkspaces()}
-              onRefreshFields={() => setRefreshCounter((c) => c + 1)}
-              onNotify={notify}
-            />
-          )}
+            ) : selectedLeadId ? (
+              <LeadDetailView
+                lang={lang}
+                businessId={activeBusiness.id}
+                leadId={selectedLeadId}
+                userRole={effectiveRole}
+                stages={stages}
+                customFields={customFields}
+                members={members}
+                onBack={handleCloseLeadDetail}
+                onUpdated={() => setRefreshCounter((c) => c + 1)}
+                onNotify={notify}
+              />
+            ) : activeTab === 'dashboard' ? (
+              <DashboardView
+                lang={lang}
+                businessId={activeBusiness.id}
+                analytics={analytics}
+                loading={analyticsLoading}
+                onSelectLead={(id) => navigateToLead(id)}
+                onNavigateLeads={() => setActiveTab('leads')}
+                onNavigateFollowUps={() => setActiveTab('followups')}
+                onAddLead={() => setShowCreateLeadModal(true)}
+              />
+            ) : activeTab === 'leads' ? (
+              <LeadsView
+                lang={lang}
+                businessId={activeBusiness.id}
+                userRole={effectiveRole}
+                stages={stages}
+                customFields={customFields}
+                members={members}
+                onSelectLead={(id) => navigateToLead(id)}
+                onAddLead={() => setShowCreateLeadModal(true)}
+                onNotify={notify}
+                refreshTrigger={refreshCounter}
+              />
+            ) : activeTab === 'pipeline' ? (
+              <PipelineView
+                lang={lang}
+                businessId={activeBusiness.id}
+                userRole={effectiveRole}
+                stages={stages}
+                onSelectLead={(id) => navigateToLead(id)}
+                onStagesChanged={() => setRefreshCounter((c) => c + 1)}
+                onNotify={notify}
+              />
+            ) : activeTab === 'followups' ? (
+              <FollowUpsView
+                lang={lang}
+                businessId={activeBusiness.id}
+                onSelectLead={(id) => navigateToLead(id)}
+                onNotify={notify}
+              />
+            ) : activeTab === 'campaigns' ? (
+              <CampaignsView lang={lang} analytics={analytics} />
+            ) : activeTab === 'team' ? (
+              <TeamView
+                lang={lang}
+                business={activeBusiness}
+                userRole={effectiveRole}
+                currentUser={authUser}
+                members={members}
+                onRefresh={() => setRefreshCounter((c) => c + 1)}
+                onNotify={notify}
+              />
+            ) : activeTab === 'integrations' ? (
+              <IntegrationsView
+                lang={lang}
+                businessId={activeBusiness.id}
+                userRole={effectiveRole}
+                onLeadsUpdated={() => setRefreshCounter((c) => c + 1)}
+                onNotify={notify}
+              />
+            ) : (
+              <SettingsView
+                lang={lang}
+                business={activeBusiness}
+                userRole={effectiveRole}
+                customFields={customFields}
+                onRefreshBusiness={() => loadSessionAndWorkspaces()}
+                onRefreshFields={() => setRefreshCounter((c) => c + 1)}
+                onNotify={notify}
+              />
+            )}
+          </Suspense>
         </main>
       </div>
 
-      <WorkspaceWizardModal
-        open={showWorkspaceModal}
-        lang={lang}
-        onClose={() => setShowWorkspaceModal(false)}
-        onCreate={handleCreateWorkspace}
-      />
+      {/* Mobile Thumb-Zone Bottom Tab Bar */}
+      <nav
+        aria-label={isAr ? 'التنقل السريع' : 'Mobile navigation'}
+        className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-slate-900/95 backdrop-blur-md pb-safe"
+      >
+        <div className="grid grid-cols-5 h-14">
+          {[
+            { id: 'dashboard' as NavTab, label: isAr ? 'الرئيسية' : 'Home', icon: LayoutDashboard },
+            { id: 'leads' as NavTab, label: isAr ? 'العملاء' : 'Leads', icon: Users },
+            { id: 'pipeline' as NavTab, label: isAr ? 'المراحل' : 'Pipeline', icon: Kanban },
+            { id: 'followups' as NavTab, label: isAr ? 'المتابعات' : 'Tasks', icon: CalendarClock },
+          ].map((item) => {
+            const Icon = item.icon;
+            const active = activeTab === item.id && !selectedLeadId;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(item.id);
+                  setSelectedLeadId(null);
+                  syncLeadUrl(null);
+                }}
+                className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors ${
+                  active
+                    ? 'text-[#0F1E3D] dark:text-blue-400'
+                    : 'text-slate-500 dark:text-slate-400'
+                }`}
+              >
+                <Icon className={`h-5 w-5 ${active ? 'stroke-[2.25]' : ''}`} />
+                <span className="truncate max-w-full px-1">{item.label}</span>
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className={`flex flex-col items-center justify-center gap-0.5 text-[10px] font-semibold transition-colors ${
+              ['campaigns', 'team', 'integrations', 'settings'].includes(activeTab) && !selectedLeadId
+                ? 'text-[#0F1E3D] dark:text-blue-400'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
+          >
+            <MoreHorizontal className="h-5 w-5" />
+            <span className="truncate max-w-full px-1">{isAr ? 'المزيد' : 'More'}</span>
+          </button>
+        </div>
+      </nav>
 
-      {activeBusiness && (
-        <CreateLeadModal
-          open={showCreateLeadModal}
-          lang={lang}
-          stages={stages}
-          customFields={customFields}
-          members={members}
-          userRole={effectiveRole}
-          onClose={() => setShowCreateLeadModal(false)}
-          onSubmit={handleCreateLead}
-        />
-      )}
+      <Suspense fallback={null}>
+        {showWorkspaceModal && (
+          <WorkspaceWizardModal
+            open={showWorkspaceModal}
+            lang={lang}
+            onClose={() => setShowWorkspaceModal(false)}
+            onCreate={handleCreateWorkspace}
+          />
+        )}
+
+        {activeBusiness && showCreateLeadModal && (
+          <CreateLeadModal
+            open={showCreateLeadModal}
+            lang={lang}
+            stages={stages}
+            customFields={customFields}
+            members={members}
+            userRole={effectiveRole}
+            onClose={() => setShowCreateLeadModal(false)}
+            onSubmit={handleCreateLead}
+          />
+        )}
+      </Suspense>
     </div>
   );
 }

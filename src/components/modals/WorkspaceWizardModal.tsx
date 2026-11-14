@@ -62,18 +62,18 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
-      <div className="w-full max-w-lg rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-6">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-950/60 backdrop-blur-xs p-0 sm:p-4">
+      <div className="w-full max-w-lg max-h-[92dvh] overflow-y-auto rounded-t-2xl sm:rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-xl p-5 sm:p-6 pb-safe crm-sheet-enter">
         <div className="flex items-center justify-between pb-4 border-b border-slate-200 dark:border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#0F1E3D] text-white dark:bg-blue-600">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#0F1E3D] text-white dark:bg-blue-600">
               <Building2 className="h-5 w-5" />
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 truncate">
                 {isAr ? 'إنشاء مساحة عمل جديدة' : 'Create Business Workspace'}
               </h2>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
+              <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
                 {isAr
                   ? 'بيئة عمل معزولة بالكامل بعملائها ومراحلها وفريقها'
                   : 'Isolated tenant workspace with independent leads, pipeline & team'}
@@ -83,13 +83,13 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            className="rounded-lg min-h-[40px] min-w-[40px] flex items-center justify-center text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+        <form onSubmit={handleSubmit} className="mt-4 sm:mt-5 space-y-4">
           {error && (
             <div className="rounded-lg border border-red-200 bg-red-50 dark:bg-red-950/40 dark:border-red-900 px-3 py-2 text-xs text-red-700 dark:text-red-300">
               {error}
@@ -106,11 +106,11 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder={isAr ? 'مثال: شركة النخبة للخدمات' : 'e.g. Vertex Services Group'}
-              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+              className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                 {isAr ? 'القطاع / التصنيف' : 'Industry / Category'}
@@ -120,7 +120,7 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
                 placeholder={isAr ? 'عقارات، عيادات، تجارة...' : 'Services, Retail, Health...'}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
 
@@ -131,7 +131,7 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
               <select
                 value={countryCode}
                 onChange={(e) => setCountryCode(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
               >
                 <option value="+966">+966 (Saudi Arabia)</option>
                 <option value="+971">+971 (UAE)</option>
@@ -145,7 +145,7 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 sm:gap-4">
             <div>
               <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                 {isAr ? 'رقم الهاتف' : 'Business Phone'}
@@ -156,7 +156,7 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
                 onChange={(e) => setPhone(e.target.value)}
                 dir="ltr"
                 placeholder="+966 50 000 0000"
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
             <div>
@@ -169,7 +169,7 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
                 onChange={(e) => setEmail(e.target.value)}
                 dir="ltr"
                 placeholder="contact@company.com"
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
           </div>
@@ -178,14 +178,14 @@ export const WorkspaceWizardModal: React.FC<WorkspaceWizardModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 min-h-[44px] sm:min-h-0 sm:py-2 text-sm font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
             >
               {isAr ? 'إلغاء' : 'Cancel'}
             </button>
             <button
               type="submit"
               disabled={submitting}
-              className="rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-5 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-5 min-h-[44px] sm:min-h-0 sm:py-2 text-sm font-medium text-white disabled:opacity-60"
             >
               {submitting ? (isAr ? 'جاري الإنشاء...' : 'Creating...') : isAr ? 'إنشاء المساحة' : 'Create Workspace'}
             </button>

@@ -126,10 +126,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   return (
-    <div className="space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="space-y-4 sm:space-y-6 crm-animate-enter">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Business Profile */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6">
           <div className="flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-slate-100 mb-4">
             <Building2 className="h-4 w-4 text-blue-600" />
             <span>{isAr ? 'ملف النشاط التجاري والهوية' : 'Business Profile & Branding'}</span>
@@ -142,10 +142,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 disabled={!isAdmin}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                   {isAr ? 'القطاع' : 'Industry'}
@@ -155,7 +155,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   disabled={!isAdmin}
                   value={industry}
                   onChange={(e) => setIndustry(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm"
                 />
               </div>
               <div>
@@ -168,11 +168,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   disabled={!isAdmin}
                   value={countryCode}
                   onChange={(e) => setCountryCode(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm"
                 />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">{t.phone}</label>
                 <input
@@ -181,7 +181,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   disabled={!isAdmin}
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm"
                 />
               </div>
               <div>
@@ -192,16 +192,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   disabled={!isAdmin}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-sm"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[44px] sm:min-h-0 text-base sm:text-sm"
                 />
               </div>
             </div>
             {isAdmin && (
-              <div className="flex items-center justify-between pt-2">
+              <div className="flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-2.5 pt-2">
                 <button
                   type="button"
                   onClick={handleDownloadBackup}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3.5 py-2 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3.5 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-medium hover:bg-slate-50 dark:hover:bg-slate-800"
                 >
                   <Download className="h-3.5 w-3.5" />
                   <span>{isAr ? 'نسخة احتياطية كاملة (JSON)' : 'Export Workspace Backup (JSON)'}</span>
@@ -209,7 +209,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <button
                   type="submit"
                   disabled={savingBiz}
-                  className="rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-4 py-2 text-xs font-medium text-white"
+                  className="rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-4 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-medium text-white"
                 >
                   {t.save}
                 </button>
@@ -219,7 +219,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
 
         {/* Custom Lead Fields Builder */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-6 space-y-4">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t.customFieldsSection}</h3>
           <div className="space-y-2 max-h-56 overflow-y-auto">
             {customFields.length === 0 ? (
@@ -232,8 +232,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   key={cf.id}
                   className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 dark:border-slate-800 px-3 py-2 text-xs"
                 >
-                  <div>
-                    <div className="font-semibold text-slate-800 dark:text-slate-200">
+                  <div className="min-w-0">
+                    <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
                       {cf.label_ar} · {cf.label_en}
                     </div>
                     <div className="text-slate-400 font-mono">{cf.field_type}</div>
@@ -242,7 +242,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <button
                       type="button"
                       onClick={() => handleDeleteField(cf.id)}
-                      className="p-1 text-red-500 hover:text-red-700"
+                      className="p-2 text-red-500 hover:text-red-700 shrink-0"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -254,14 +254,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           {isAdmin && (
             <form onSubmit={handleAddField} className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input
                   type="text"
                   required
                   value={labelAr}
                   onChange={(e) => setLabelAr(e.target.value)}
                   placeholder={isAr ? 'التسمية بالعربية' : 'Arabic Label'}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[42px] sm:min-h-0 text-base sm:text-xs"
                 />
                 <input
                   type="text"
@@ -269,14 +269,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   value={labelEn}
                   onChange={(e) => setLabelEn(e.target.value)}
                   placeholder={isAr ? 'التسمية بالإنجليزية' : 'English Label'}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[42px] sm:min-h-0 text-base sm:text-xs"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <select
                   value={fieldType}
                   onChange={(e) => setFieldType(e.target.value as CustomFieldType)}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[42px] sm:min-h-0 text-base sm:text-xs"
                 >
                   <option value="text">Text</option>
                   <option value="number">Number</option>
@@ -290,7 +290,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </select>
                 <button
                   type="submit"
-                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-3 py-2 font-medium text-white"
+                  className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-3 min-h-[42px] sm:min-h-0 sm:py-2 font-medium text-white"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   <span>{isAr ? 'إضافة حقل' : 'Add Custom Field'}</span>
@@ -302,7 +302,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   value={optionsText}
                   onChange={(e) => setOptionsText(e.target.value)}
                   placeholder={isAr ? 'الخيارات مفصولة بفاصلة: خيار 1, خيار 2' : 'Options comma-separated: Option A, Option B'}
-                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2"
+                  className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 min-h-[42px] sm:min-h-0 text-base sm:text-xs"
                 />
               )}
             </form>
@@ -313,13 +313,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* Audit Logs */}
       {isAdmin && (
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
+          <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
             <Shield className="h-4 w-4 text-blue-600" />
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
               {isAr ? 'سجل التدقيق الأمني (Audit Logs)' : 'Security Audit Logs'}
             </h3>
           </div>
-          <div className="overflow-x-auto max-h-72">
+          <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800 text-xs max-h-72 overflow-y-auto">
+            {auditLogs.map((log) => (
+              <div key={log.id} className="p-3.5 space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">{log.action}</span>
+                  <span className="text-slate-500">{log.entity_type}</span>
+                </div>
+                <div className="flex items-center justify-between text-slate-500 tabular-nums">
+                  <span>{log.actor_name || log.actor_email || 'System'}</span>
+                  <span>{new Date(log.created_at).toLocaleString(isAr ? 'ar-SA' : 'en-US')}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="hidden md:block overflow-x-auto max-h-72">
             <table className="w-full text-start border-collapse text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-500 font-semibold">

@@ -34,12 +34,40 @@ export const CampaignsView: React.FC<CampaignsViewProps> = ({ lang, analytics })
         </div>
       </div>
 
-      {/* Campaign Attribution Table */}
+      {/* Campaign Attribution Table + Mobile Cards */}
       <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800">
+        <div className="px-4 sm:px-5 py-3.5 sm:py-4 border-b border-slate-200 dark:border-slate-800">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t.campaignPerformance}</h3>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* Mobile Campaign Cards */}
+        <div className="md:hidden divide-y divide-slate-100 dark:divide-slate-800">
+          {analytics.charts.byCampaign.map((c) => (
+            <div key={c.name} className="p-4 space-y-2.5 text-xs crm-cv-auto">
+              <div className="font-bold text-sm text-slate-900 dark:text-slate-100 break-words">{c.name}</div>
+              <div className="grid grid-cols-4 gap-2 text-center rounded-lg bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-slate-800 p-2.5">
+                <div>
+                  <div className="text-[10px] text-slate-400">{t.totalLeads}</div>
+                  <div className="font-bold text-slate-900 dark:text-slate-100 tabular-nums mt-0.5">{c.total}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400">{t.qualifiedLeads}</div>
+                  <div className="font-bold text-teal-600 tabular-nums mt-0.5">{c.qualified}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400">{t.convertedLeads}</div>
+                  <div className="font-bold text-emerald-600 tabular-nums mt-0.5">{c.converted}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] text-slate-400">{t.conversionRate}</div>
+                  <div className="font-bold text-slate-900 dark:text-slate-100 tabular-nums mt-0.5">{c.conversionRate}%</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-start border-collapse text-xs">
             <thead>
               <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 text-slate-500 font-semibold">

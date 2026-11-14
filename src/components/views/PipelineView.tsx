@@ -132,15 +132,24 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
     }
   };
 
+  const [activeMobileStageId, setActiveMobileStageId] = useState<string>('');
+
+  const displayedMobileStages =
+    activeMobileStageId && stages.some((s) => s.id === activeMobileStageId)
+      ? stages.filter((s) => s.id === activeMobileStageId)
+      : stages;
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3">
-        <p className="text-xs text-slate-500 dark:text-slate-400">{t.dragHint}</p>
+    <div className="space-y-4 crm-animate-enter">
+      <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-3.5 sm:px-4 py-3">
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          {isAr ? 'اسحب البطاقة أو استخدم القائمة لاختيار المرحلة' : t.dragHint}
+        </p>
         {isAdmin && (
           <button
             type="button"
             onClick={() => setShowStageEditor((v) => !v)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 dark:border-slate-700 px-3 min-h-[40px] sm:min-h-0 sm:py-1.5 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
           >
             <Settings2 className="h-3.5 w-3.5" />
             <span>{t.manageStages}</span>
@@ -148,72 +157,118 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         )}
       </div>
 
+      {/* Mobile Stage Quick-Filter Switcher */}
+      {stages.length > 0 && (
+        <div className="md:hidden flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+          <button
+            type="button"
+            onClick={() => setActiveMobileStageId('')}
+            className={`px-3 min-h-[38px] rounded-lg text-xs font-medium border whitespace-nowrap ${
+              activeMobileStageId === ''
+                ? 'bg-[#0F1E3D] dark:bg-blue-600 text-white border-transparent'
+                : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
+            }`}
+          >
+            {t.allStatuses}
+          </button>
+          {stages.map((st) => {
+            const active = activeMobileStageId === st.id;
+            const count = leads.filter((l) => l.status_id === st.id).length;
+            return (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => setActiveMobileStageId(active ? '' : st.id)}
+                className={`inline-flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-medium border whitespace-nowrap ${
+                  active
+                    ? 'font-semibold shadow-xs'
+                    : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
+                }`}
+                style={
+                  active
+                    ? { color: st.color, backgroundColor: `${st.color}16`, borderColor: `${st.color}55` }
+                    : undefined
+                }
+              >
+                <span className="h-2 w-2 rounded-[2px] shrink-0" style={{ backgroundColor: st.color }} />
+                <span>{isAr ? st.name_ar : st.name_en}</span>
+                <span className="font-mono text-[11px] opacity-75 tabular-nums">({count})</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {showStageEditor && isAdmin && (
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-4">
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 sm:p-5 space-y-4">
           <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t.manageStages}</h3>
           <div className="space-y-2">
             {stages.map((st, idx) => (
-              <div key={st.id} className="flex flex-wrap items-center gap-2 p-2 rounded-lg border border-slate-100 dark:border-slate-800">
+              <div key={st.id} className="flex flex-wrap items-center gap-2 p-2.5 rounded-lg border border-slate-100 dark:border-slate-800">
                 <input
                   type="color"
                   defaultValue={st.color}
                   onBlur={(e) => handleRenameStage(st.id, st.name_ar, st.name_en, e.target.value)}
-                  className="h-7 w-9 rounded border border-slate-200 cursor-pointer"
+                  className="h-8 w-9 rounded border border-slate-200 cursor-pointer shrink-0"
                 />
                 <input
                   type="text"
                   defaultValue={st.name_ar}
                   onBlur={(e) => handleRenameStage(st.id, e.target.value, st.name_en, st.color)}
-                  className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1 text-xs"
+                  className="min-w-[120px] flex-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-base sm:text-xs"
                 />
                 <input
                   type="text"
                   defaultValue={st.name_en}
                   onBlur={(e) => handleRenameStage(st.id, st.name_ar, e.target.value, st.color)}
-                  className="rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1 text-xs"
+                  className="min-w-[120px] flex-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 py-1.5 text-base sm:text-xs"
                 />
-                <button type="button" onClick={() => handleReorder(idx, -1)} className="p-1 text-slate-500 hover:text-slate-800">
-                  <ArrowUp className="h-3.5 w-3.5" />
-                </button>
-                <button type="button" onClick={() => handleReorder(idx, 1)} className="p-1 text-slate-500 hover:text-slate-800">
-                  <ArrowDown className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteStage(st.id)}
-                  className="p-1 text-red-500 hover:text-red-700 ms-auto"
-                  title={t.delete}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                <div className="flex items-center gap-1 ms-auto">
+                  <button type="button" onClick={() => handleReorder(idx, -1)} className="p-2 text-slate-500 hover:text-slate-800">
+                    <ArrowUp className="h-3.5 w-3.5" />
+                  </button>
+                  <button type="button" onClick={() => handleReorder(idx, 1)} className="p-2 text-slate-500 hover:text-slate-800">
+                    <ArrowDown className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteStage(st.id)}
+                    className="p-2 text-red-500 hover:text-red-700"
+                    title={t.delete}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
 
-          <form onSubmit={handleAddStage} className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-            <input
-              type="color"
-              value={newColor}
-              onChange={(e) => setNewColor(e.target.value)}
-              className="h-8 w-10 rounded border border-slate-200"
-            />
-            <input
-              type="text"
-              value={newNameAr}
-              onChange={(e) => setNewNameAr(e.target.value)}
-              placeholder={isAr ? 'الاسم بالعربية' : 'Arabic name'}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
-            />
+          <form onSubmit={handleAddStage} className="grid grid-cols-1 sm:flex sm:flex-wrap items-center gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center gap-2">
+              <input
+                type="color"
+                value={newColor}
+                onChange={(e) => setNewColor(e.target.value)}
+                className="h-10 w-12 rounded border border-slate-200 shrink-0"
+              />
+              <input
+                type="text"
+                value={newNameAr}
+                onChange={(e) => setNewNameAr(e.target.value)}
+                placeholder={isAr ? 'الاسم بالعربية' : 'Arabic name'}
+                className="flex-1 min-w-0 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-base sm:text-xs"
+              />
+            </div>
             <input
               type="text"
               value={newNameEn}
               onChange={(e) => setNewNameEn(e.target.value)}
               placeholder={isAr ? 'الاسم بالإنجليزية' : 'English name'}
-              className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-2 text-base sm:text-xs"
             />
             <button
               type="submit"
-              className="inline-flex items-center gap-1 rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-3 py-1.5 text-xs font-medium text-white"
+              className="inline-flex items-center justify-center gap-1 rounded-lg bg-[#0F1E3D] dark:bg-blue-600 px-3.5 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-medium text-white"
             >
               <Plus className="h-3.5 w-3.5" />
               <span>{t.addStage}</span>
@@ -222,9 +277,13 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         </div>
       )}
 
-      {/* Kanban Columns */}
-      <div className="flex gap-4 overflow-x-auto pb-4">
-        {stages.map((stage) => {
+      {/* Kanban Columns (Snap-Scrolling on Mobile; Multi-Column Board on Desktop) */}
+      <div
+        className={`flex gap-3 sm:gap-4 overflow-x-auto pb-4 snap-x snap-mandatory md:snap-none ${
+          activeMobileStageId ? 'flex-col md:flex-row' : ''
+        }`}
+      >
+        {(typeof window !== 'undefined' && activeMobileStageId ? displayedMobileStages : stages).map((stage) => {
           const stageLeads = leads.filter((l) => l.status_id === stage.id);
           return (
             <div
@@ -236,7 +295,9 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                   setDraggingId(null);
                 }
               }}
-              className="w-72 shrink-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/60 flex flex-col max-h-[72vh]"
+              className={`${
+                activeMobileStageId ? 'w-full md:w-72' : 'w-[84vw] sm:w-72 snap-center'
+              } shrink-0 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-900/60 flex flex-col max-h-[70dvh] sm:max-h-[72vh]`}
             >
               <div className="flex items-center justify-between px-3.5 py-3 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-t-xl">
                 <div className="flex items-center gap-2 min-w-0">
@@ -255,7 +316,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                     draggable
                     onDragStart={() => setDraggingId(lead.id)}
                     onClick={() => onSelectLead(lead.id)}
-                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 cursor-grab active:cursor-grabbing hover:border-blue-400 transition-colors"
+                    className="rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-3 cursor-grab active:cursor-grabbing hover:border-blue-400 transition-colors crm-cv-auto"
                   >
                     <div className="flex items-center justify-between text-[11px] text-slate-400">
                       <span className="font-mono">{lead.lead_code}</span>
@@ -275,7 +336,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                       <select
                         value={lead.status_id || ''}
                         onChange={(e) => moveLeadToStage(lead.id, e.target.value)}
-                        className="rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-1.5 py-0.5 text-[11px]"
+                        className="rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-2 min-h-[34px] sm:min-h-0 sm:py-0.5 text-xs sm:text-[11px]"
                         aria-label="Move lead stage"
                       >
                         {stages.map((s) => (
