@@ -9,7 +9,10 @@ import { createAndBroadcastNotification } from './notificationService.ts';
 export { addSseClient, removeSseClient, broadcastWorkspaceEvent };
 
 export const ALSAFA_WORKSPACE_ID = 'alsafa-steel-workspace';
-const __sheetServiceDir = path.dirname(fileURLToPath(import.meta.url));
+const __sheetServiceDir =
+  typeof import.meta !== 'undefined' && Boolean(import.meta.url)
+    ? path.dirname(fileURLToPath(import.meta.url))
+    : path.join(process.cwd(), 'server', 'services');
 const CANDIDATE_SHEET_PATHS = [
   path.join(process.cwd(), 'public', 'assets', 'aistudio', '________________________________e27d1ae1'),
   path.resolve(__sheetServiceDir, '../../public/assets/aistudio/________________________________e27d1ae1'),

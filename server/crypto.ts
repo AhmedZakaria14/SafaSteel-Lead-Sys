@@ -13,21 +13,31 @@ function getEncryptionKey(): Buffer {
     return cachedKey;
   }
 
-  const dataDir = path.join(process.cwd(), '.data');
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-  const keyFile = path.join(dataDir, '.encryption.key');
-  if (fs.existsSync(keyFile)) {
-    const raw = fs.readFileSync(keyFile, 'utf8').trim();
-    cachedKey = Buffer.from(raw, 'hex');
+  const baseDir = process.env.VERCEL ? '/tmp' : process.cwd();
+  const dataDir = path.join(baseDir, '.data');
+  try {
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    const keyFile = path.join(dataDir, '.encryption.key');
+    if (fs.existsSync(keyFile)) {
+      const raw = fs.readFileSync(keyFile, 'utf8').trim();
+      cachedKey = Buffer.from(raw, 'hex');
+      return cachedKey;
+    }
+
+    const generated = crypto.randomBytes(32);
+    fs.writeFileSync(keyFile, generated.toString('hex'), { mode: 0o600 });
+    cachedKey = generated;
+    return cachedKey;
+  } catch {
+    // Ephemeral fallback if runtime filesystem is completely read-only
+    cachedKey = crypto
+      .createHash('sha256')
+      .update(process.env.AUTH_SESSION_SECRET || 'leadflow-ephemeral-fallback-key')
+      .digest();
     return cachedKey;
   }
-
-  const generated = crypto.randomBytes(32);
-  fs.writeFileSync(keyFile, generated.toString('hex'), { mode: 0o600 });
-  cachedKey = generated;
-  return cachedKey;
 }
 
 export function encryptSecret(plaintext: string): string {

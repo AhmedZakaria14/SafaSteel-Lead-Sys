@@ -1,30 +1,200 @@
-import { DatabaseSync } from 'node:sqlite';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
-export type SqlDb = DatabaseSync;
+export interface SqlRunResult {
+  changes: number | bigint;
+  lastInsertRowid: number | bigint;
+}
+
+export interface SqlStatement {
+  run(...params: unknown[]): SqlRunResult;
+  get(...params: unknown[]): any;
+  all(...params: unknown[]): any[];
+}
+
+export interface SqlDb {
+  exec(sql: string): void;
+  prepare(sql: string): SqlStatement;
+}
 
 let singletonDb: SqlDb | null = null;
+let cachedSqlJs: any = null;
+let sqlJsLoadPromise: Promise<any> | null = null;
 
-export function createDatabase(dbPath?: string): SqlDb {
+function normalizeBindParams(params: unknown[]): Array<string | number | Uint8Array | null> {
+  return params.map((p) => {
+    if (p === undefined || p === null) return null;
+    if (typeof p === 'boolean') return p ? 1 : 0;
+    if (typeof p === 'bigint') return Number(p);
+    if (p instanceof Uint8Array) return p;
+    if (typeof p === 'number' || typeof p === 'string') return p;
+    return String(p);
+  });
+}
+
+class SqlJsCompatDb implements SqlDb {
+  private rawDb: any;
+  private filePath: string;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor(SQL: any, filePath: string) {
+    this.filePath = filePath;
+    if (filePath !== ':memory:' && fs.existsSync(filePath)) {
+      try {
+        const bytes = fs.readFileSync(filePath);
+        this.rawDb = new SQL.Database(new Uint8Array(bytes));
+      } catch {
+        this.rawDb = new SQL.Database();
+      }
+    } else {
+      this.rawDb = new SQL.Database();
+    }
+  }
+
+  private schedulePersist() {
+    if (this.filePath === ':memory:') return;
+    if (this.persistTimer) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      try {
+        const dir = path.dirname(this.filePath);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+        const exported = this.rawDb.export();
+        fs.writeFileSync(this.filePath, Buffer.from(exported));
+      } catch {
+        // Ignore non-writable filesystem errors in serverless ephemeral containers
+      }
+    }, 25);
+    if (typeof (this.persistTimer as any).unref === 'function') {
+      (this.persistTimer as any).unref();
+    }
+  }
+
+  exec(sql: string): void {
+    this.rawDb.exec(sql);
+    if (!/^\s*(BEGIN|ROLLBACK|PRAGMA|SELECT)/i.test(sql)) {
+      this.schedulePersist();
+    }
+  }
+
+  prepare(sql: string): SqlStatement {
+    const rawDb = this.rawDb;
+    const schedulePersist = () => this.schedulePersist();
+
+    return {
+      run(...params: unknown[]): SqlRunResult {
+        const stmt = rawDb.prepare(sql);
+        try {
+          const normalized = normalizeBindParams(params);
+          if (normalized.length > 0) stmt.bind(normalized);
+          stmt.step();
+          schedulePersist();
+          return {
+            changes: typeof rawDb.getRowsModified === 'function' ? rawDb.getRowsModified() : 0,
+            lastInsertRowid: 0,
+          };
+        } finally {
+          stmt.free();
+        }
+      },
+      get(...params: unknown[]): any {
+        const stmt = rawDb.prepare(sql);
+        try {
+          const normalized = normalizeBindParams(params);
+          if (normalized.length > 0) stmt.bind(normalized);
+          if (stmt.step()) {
+            return stmt.getAsObject();
+          }
+          return undefined;
+        } finally {
+          stmt.free();
+        }
+      },
+      all(...params: unknown[]): any[] {
+        const stmt = rawDb.prepare(sql);
+        const rows: any[] = [];
+        try {
+          const normalized = normalizeBindParams(params);
+          if (normalized.length > 0) stmt.bind(normalized);
+          while (stmt.step()) {
+            rows.push(stmt.getAsObject());
+          }
+          return rows;
+        } finally {
+          stmt.free();
+        }
+      },
+    };
+  }
+}
+
+function tryLoadNativeSqlite(): (new (dbPath: string) => SqlDb) | null {
+  try {
+    const getBuiltin = (process as any).getBuiltinModule;
+    if (typeof getBuiltin !== 'function') return null;
+    const mod = getBuiltin.call(process, 'node:sqlite');
+    return mod?.DatabaseSync || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function ensureDbReady(): Promise<void> {
+  if (cachedSqlJs) return;
+  if (!sqlJsLoadPromise) {
+    sqlJsLoadPromise = (async () => {
+      // @ts-ignore - subpath export without bundled .d.ts
+      const mod: any = await import('sql.js/dist/sql-wasm-inline.js');
+      const initSqlJs = mod.default || mod;
+      cachedSqlJs = await initSqlJs();
+      return cachedSqlJs;
+    })();
+  }
+  await sqlJsLoadPromise;
+}
+
+export function createDatabase(dbPath?: string, forceDriver?: 'native' | 'sqljs'): SqlDb {
   const defaultDir = process.env.VERCEL ? '/tmp' : path.join(process.cwd(), '.data');
   const resolvedPath =
     dbPath || process.env.DATABASE_PATH || path.join(defaultDir, 'leadflow.db');
 
   if (resolvedPath !== ':memory:') {
-    const dir = path.dirname(resolvedPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    try {
+      const dir = path.dirname(resolvedPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    } catch {
+      // Fallback safely if directory creation fails
     }
   }
 
-  const db = new DatabaseSync(resolvedPath);
-  db.exec('PRAGMA foreign_keys = ON;');
-  if (resolvedPath !== ':memory:') {
-    db.exec('PRAGMA journal_mode = WAL;');
+  if (forceDriver !== 'sqljs' && !process.env.VERCEL) {
+    const NativeDatabaseSync = tryLoadNativeSqlite();
+    if (NativeDatabaseSync) {
+      try {
+        const db = new NativeDatabaseSync(resolvedPath);
+        db.exec('PRAGMA foreign_keys = ON;');
+        if (resolvedPath !== ':memory:') {
+          db.exec('PRAGMA journal_mode = WAL;');
+        }
+        initSchema(db);
+        return db;
+      } catch {
+        // Fall through to sql.js if native node:sqlite is unavailable or missing flag
+      }
+    }
   }
 
+  if (!cachedSqlJs) {
+    throw new Error('SQL.js engine not initialized. Call await ensureDbReady() before createDatabase/getDb.');
+  }
+
+  const db = new SqlJsCompatDb(cachedSqlJs, resolvedPath);
+  db.exec('PRAGMA foreign_keys = ON;');
   initSchema(db);
   return db;
 }

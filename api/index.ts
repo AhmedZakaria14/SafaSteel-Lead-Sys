@@ -1,9 +1,10 @@
 import type { Request, Response } from 'express';
+import { ensureDbReady } from '../server/db.ts';
 import { buildApp } from '../server.ts';
 
 let cachedApp: ReturnType<typeof buildApp> | null = null;
 
-export default function handler(req: Request, res: Response) {
+export default async function handler(req: Request, res: Response) {
   try {
     const rawUrl = req.url || '/api';
     const urlObj = new URL(rawUrl, 'http://localhost');
@@ -20,6 +21,7 @@ export default function handler(req: Request, res: Response) {
     }
 
     if (!cachedApp) {
+      await ensureDbReady();
       cachedApp = buildApp();
     }
     return cachedApp(req, res);

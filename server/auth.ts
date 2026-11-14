@@ -3,13 +3,32 @@ import { initializeApp, getApps } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
 import crypto from 'node:crypto';
-import firebaseConfig from '../firebase-applet-config.json' with { type: 'json' };
+import fs from 'node:fs';
+import path from 'node:path';
 import { SqlDb } from './db.ts';
 
-if (!getApps().length && firebaseConfig?.projectId && firebaseConfig.projectId !== 'remixed-project-id') {
-  initializeApp({
-    projectId: firebaseConfig.projectId,
-  });
+function loadFirebaseConfig(): { projectId?: string; firestoreDatabaseId?: string } {
+  try {
+    const configPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    }
+  } catch {
+    // Ignore missing or unreadable config
+  }
+  return {};
+}
+
+const firebaseConfig = loadFirebaseConfig();
+
+try {
+  if (!getApps().length && firebaseConfig?.projectId && firebaseConfig.projectId !== 'remixed-project-id') {
+    initializeApp({
+      projectId: firebaseConfig.projectId,
+    });
+  }
+} catch {
+  // Graceful skip if Firebase Admin init fails in serverless environment
 }
 
 export const MASTER_OWNER_EMAIL = 'azeco77@gmail.com';

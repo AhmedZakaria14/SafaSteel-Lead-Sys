@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import dotenv from 'dotenv';
-import { getDb, SqlDb } from './server/db.ts';
+import { ensureDbReady, getDb, SqlDb } from './server/db.ts';
 import { ensureDemoData } from './server/seedDemo.ts';
 import { ALSAFA_WORKSPACE_ID, ATTACHED_SHEET_PATH, startAttachedSheetWatcher } from './server/services/sheetSyncService.ts';
 import { createAuthMiddleware, createRateLimiter, defaultTokenVerifier, TokenVerifier } from './server/auth.ts';
@@ -12,7 +12,10 @@ import { createGoogleRoutes } from './server/routes/google.ts';
 
 dotenv.config();
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const __dirname =
+  typeof import.meta !== 'undefined' && Boolean(import.meta.url)
+    ? path.dirname(fileURLToPath(import.meta.url))
+    : process.cwd();
 
 export function buildApp(options?: { db?: SqlDb; tokenVerifier?: TokenVerifier }) {
   const db = options?.db || getDb();
@@ -63,6 +66,7 @@ export function buildApp(options?: { db?: SqlDb; tokenVerifier?: TokenVerifier }
 }
 
 async function startServer() {
+  await ensureDbReady();
   const db = getDb();
   const app = buildApp({ db });
   startAttachedSheetWatcher(db, ALSAFA_WORKSPACE_ID, ATTACHED_SHEET_PATH);
@@ -90,6 +94,8 @@ async function startServer() {
 
 const isMainEntry =
   Boolean(process.argv[1]) &&
+  typeof import.meta !== 'undefined' &&
+  Boolean(import.meta.url) &&
   import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 
 if (isMainEntry && process.env.NODE_ENV !== 'test') {

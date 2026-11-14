@@ -2,7 +2,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import http from 'node:http';
-import { createDatabase } from '../server/db.ts';
+import { createDatabase, ensureDbReady } from '../server/db.ts';
 import { buildApp } from '../server.ts';
 
 process.env.NODE_ENV = 'test';
@@ -447,6 +447,47 @@ describe('LeadFlow CRM Acceptance Tests', () => {
       assert.equal(analyticsRes.status, 200);
       const analyticsJson = await analyticsRes.json();
       assert.ok(analyticsJson.summary.total > 200);
+    } finally {
+      await new Promise<void>((resolve) => srv.close(() => resolve()));
+    }
+  });
+
+  it('20. Runs cleanly on sql.js fallback driver (Vercel mode) for login, sheet seeding, analytics, and leads', async () => {
+    await ensureDbReady();
+    const sqlJsDb = createDatabase(':memory:', 'sqljs');
+    const sqlJsApp = buildApp({ db: sqlJsDb });
+
+    const srv = await new Promise<http.Server>((resolve) => {
+      const s = http.createServer(sqlJsApp);
+      s.listen(0, '127.0.0.1', () => resolve(s));
+    });
+    const port = (srv.address() as any).port;
+    try {
+      const loginRes = await fetch(`http://127.0.0.1:${port}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: 'admin', password: 'SafaSteels2026' }),
+      });
+      assert.equal(loginRes.status, 200);
+      const loginJson = await loginRes.json();
+      assert.ok(loginJson.token && loginJson.token.startsWith('lf1.'));
+      assert.ok(loginJson.businesses.some((b: any) => b.id === 'alsafa-steel-workspace'));
+
+      const analyticsRes = await fetch(
+        `http://127.0.0.1:${port}/api/businesses/alsafa-steel-workspace/analytics`,
+        { headers: { Authorization: `Bearer ${loginJson.token}` } }
+      );
+      assert.equal(analyticsRes.status, 200);
+      const analyticsJson = await analyticsRes.json();
+      assert.ok(analyticsJson.summary.total > 200, `Expected >200 leads in sql.js DB, got ${analyticsJson.summary.total}`);
+
+      const leadsRes = await fetch(
+        `http://127.0.0.1:${port}/api/businesses/alsafa-steel-workspace/leads?pageSize=10`,
+        { headers: { Authorization: `Bearer ${loginJson.token}` } }
+      );
+      assert.equal(leadsRes.status, 200);
+      const leadsJson = await leadsRes.json();
+      assert.ok(leadsJson.leads.length > 0);
     } finally {
       await new Promise<void>((resolve) => srv.close(() => resolve()));
     }
