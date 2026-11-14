@@ -41,6 +41,8 @@ function initSchema(db: SqlDb) {
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY,
       firebase_uid TEXT UNIQUE,
+      username TEXT UNIQUE,
+      password_hash TEXT,
       email TEXT NOT NULL UNIQUE,
       full_name TEXT NOT NULL,
       avatar_url TEXT,
@@ -268,6 +270,15 @@ function initSchema(db: SqlDb) {
       created_at TEXT NOT NULL
     );
   `);
+
+  const userCols = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>;
+  if (!userCols.some((c) => c.name === 'username')) {
+    db.exec('ALTER TABLE users ADD COLUMN username TEXT;');
+  }
+  if (!userCols.some((c) => c.name === 'password_hash')) {
+    db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT;');
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_lower ON users(LOWER(username)) WHERE username IS NOT NULL;');
 
   const memberCols = db.prepare('PRAGMA table_info(business_memberships)').all() as Array<{ name: string }>;
   if (!memberCols.some((c) => c.name === 'account_slot')) {

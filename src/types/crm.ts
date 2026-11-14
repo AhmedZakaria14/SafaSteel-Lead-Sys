@@ -16,12 +16,14 @@ export interface FirestoreAuthorizedAccount {
 
 export interface UserProfile {
   id: string;
+  username?: string | null;
   email: string;
   full_name: string;
   avatar_url?: string | null;
   default_language: Language;
   theme: ThemeMode;
   isOwner?: boolean;
+  isPlatformSuperAdmin?: boolean;
 }
 
 export interface Business {
@@ -139,6 +141,7 @@ export interface TeamMember {
   id: string;
   business_id: string;
   user_id?: string | null;
+  username?: string | null;
   invited_email: string;
   display_name?: string | null;
   full_name?: string | null;

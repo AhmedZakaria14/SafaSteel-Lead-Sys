@@ -6,6 +6,8 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   firebase_uid TEXT UNIQUE,
+  username TEXT UNIQUE,
+  password_hash TEXT,
   email TEXT NOT NULL UNIQUE,
   full_name TEXT NOT NULL,
   avatar_url TEXT,

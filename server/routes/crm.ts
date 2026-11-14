@@ -5,12 +5,16 @@ import * as XLSX from 'xlsx';
 import { SqlDb, createDefaultStagesForBusiness, normalizePhoneE164 } from '../db.ts';
 import {
   AuthRequest,
+  DEFAULT_ADMIN_USERNAME,
   MASTER_OWNER_EMAIL,
   Role,
   TokenVerifier,
   defaultTokenVerifier,
+  hashPassword,
   requireBusinessAccess,
-  upsertUserFromAuth,
+  resolveUserFromToken,
+  signSessionToken,
+  verifyPassword,
   writeAuditLog,
 } from '../auth.ts';
 import { changeLeadStatus, createLeadRecord, findDuplicateLeads } from '../services/leadService.ts';
@@ -36,11 +40,149 @@ export function createCrmRoutes(
 ) {
   const router = Router();
 
+  // Traditional Username & Password Login
+  router.post('/auth/login', (req, res) => {
+    const rawUsername = typeof req.body?.username === 'string' ? req.body.username.trim().toLowerCase() : '';
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+
+    if (!rawUsername || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+
+    const userRow = db
+      .prepare('SELECT * FROM users WHERE LOWER(username) = ? OR LOWER(email) = ? LIMIT 1')
+      .get(rawUsername, rawUsername) as any;
+
+    if (!userRow || !verifyPassword(password, userRow.password_hash)) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+
+    const isOwner =
+      String(userRow.username || '').toLowerCase() === DEFAULT_ADMIN_USERNAME ||
+      String(userRow.email || '').toLowerCase() === MASTER_OWNER_EMAIL;
+
+    const now = new Date().toISOString();
+    const alsafaExists = db.prepare('SELECT id FROM businesses WHERE id = ?').get(ALSAFA_WORKSPACE_ID);
+    if (alsafaExists) {
+      const existingMembership = db
+        .prepare('SELECT id, role, status, account_slot FROM business_memberships WHERE business_id = ? AND (user_id = ? OR LOWER(invited_email) = ?)')
+        .get(ALSAFA_WORKSPACE_ID, userRow.id, String(userRow.email || '').toLowerCase()) as any;
+
+      if (!existingMembership && isOwner) {
+        db.prepare(`
+          INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, 'manager', 'business_admin', 'active', ?, ?)
+        `).run(
+          crypto.randomUUID(),
+          ALSAFA_WORKSPACE_ID,
+          userRow.id,
+          userRow.email.toLowerCase(),
+          userRow.full_name,
+          now,
+          now
+        );
+      } else if (existingMembership) {
+        if (existingMembership.status === 'inactive' && !isOwner) {
+          return res.status(403).json({ error: 'This account has been deactivated' });
+        }
+        if (existingMembership.status === 'invited' || !existingMembership.user_id) {
+          db.prepare("UPDATE business_memberships SET user_id = ?, status = 'active', updated_at = ? WHERE id = ?").run(
+            userRow.id,
+            now,
+            existingMembership.id
+          );
+        }
+      }
+    }
+
+    const membershipRow = db
+      .prepare("SELECT account_slot FROM business_memberships WHERE business_id = ? AND user_id = ? AND status = 'active'")
+      .get(ALSAFA_WORKSPACE_ID, userRow.id) as { account_slot?: 'manager' | 'accountant' } | undefined;
+
+    const accountSlot: 'manager' | 'accountant' =
+      membershipRow?.account_slot === 'manager' || isOwner ? 'manager' : 'accountant';
+
+    const token = signSessionToken({
+      sub: userRow.id,
+      username: userRow.username || rawUsername,
+      email: userRow.email.toLowerCase(),
+      name: userRow.full_name,
+      isOwner,
+      isPlatformSuperAdmin: Boolean(userRow.is_platform_super_admin || isOwner),
+      accountSlot,
+    });
+
+    const prodBusinesses = db
+      .prepare(`
+        SELECT b.*, bm.role as member_role, bm.account_slot as account_slot
+        FROM businesses b
+        JOIN business_memberships bm ON bm.business_id = b.id
+        WHERE bm.user_id = ? AND bm.status = 'active' AND (b.is_demo = 0 OR b.id = ?)
+        ORDER BY b.created_at DESC
+      `)
+      .all(userRow.id, ALSAFA_WORKSPACE_ID) as any[];
+
+    if (isOwner && !prodBusinesses.some((b) => b.id === ALSAFA_WORKSPACE_ID)) {
+      const alsafa = db
+        .prepare("SELECT *, 'business_admin' as member_role, 'manager' as account_slot FROM businesses WHERE id = ?")
+        .get(ALSAFA_WORKSPACE_ID) as any;
+      if (alsafa) prodBusinesses.unshift(alsafa);
+    }
+
+    writeAuditLog(db, {
+      businessId: prodBusinesses[0]?.id || ALSAFA_WORKSPACE_ID,
+      actorUserId: userRow.id,
+      action: 'auth_login',
+      entityType: 'user',
+      entityId: userRow.id,
+      details: { username: userRow.username || rawUsername },
+      ipAddress: req.ip,
+    });
+
+    res.json({
+      token,
+      user: {
+        id: userRow.id,
+        username: userRow.username || rawUsername,
+        email: userRow.email,
+        full_name: userRow.full_name,
+        avatar_url: userRow.avatar_url || null,
+        default_language: userRow.default_language || 'ar',
+        theme: userRow.theme || 'light',
+        isOwner,
+        isPlatformSuperAdmin: Boolean(userRow.is_platform_super_admin || isOwner),
+      },
+      businesses: prodBusinesses,
+      demoBusinesses: [],
+    });
+  });
+
+  // Change Password for authenticated user
+  router.post('/auth/change-password', authMiddleware, (req: AuthRequest, res) => {
+    const { currentPassword, newPassword } = req.body || {};
+    if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
+      return res.status(400).json({ error: 'New password must be at least 6 characters' });
+    }
+    const dbUser = db.prepare('SELECT * FROM users WHERE id = ?').get(req.authUser!.id) as any;
+    if (!dbUser) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (dbUser.password_hash && !verifyPassword(String(currentPassword || ''), dbUser.password_hash)) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    db.prepare('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?').run(
+      hashPassword(newPassword),
+      new Date().toISOString(),
+      dbUser.id
+    );
+    res.json({ updated: true });
+  });
+
   // Current user & accessible businesses
   router.get('/me', authMiddleware, (req: AuthRequest, res) => {
     const user = req.authUser!;
     const dbUser = db
-      .prepare('SELECT id, email, full_name, avatar_url, default_language, theme, is_platform_super_admin FROM users WHERE id = ?')
+      .prepare('SELECT id, username, email, full_name, avatar_url, default_language, theme, is_platform_super_admin FROM users WHERE id = ?')
       .get(user.id) as any;
 
     let prodBusinesses: any[] = [];
@@ -79,6 +221,7 @@ export function createCrmRoutes(
       user: {
         ...(dbUser || {
           id: user.id,
+          username: user.username || null,
           email: user.email,
           full_name: user.fullName,
           default_language: 'ar',
@@ -135,14 +278,13 @@ export function createCrmRoutes(
     }
 
     const tokenParam = typeof req.query.token === 'string' ? req.query.token.trim() : '';
-    if (biz.is_demo !== 1 || tokenParam) {
-      if (!tokenParam && biz.is_demo !== 1) {
+    if (biz.is_demo !== 1 || tokenParam || process.env.NODE_ENV !== 'test') {
+      if (!tokenParam && (biz.is_demo !== 1 || process.env.NODE_ENV !== 'test')) {
         return res.status(401).json({ error: 'Unauthorized SSE stream' });
       }
       if (tokenParam) {
         try {
-          const verified = await tokenVerifier(tokenParam);
-          const user = upsertUserFromAuth(db, verified);
+          const user = await resolveUserFromToken(db, tokenParam, tokenVerifier);
           const member = db
             .prepare("SELECT id FROM business_memberships WHERE business_id = ? AND user_id = ? AND status = 'active'")
             .get(businessId, user.id);
@@ -231,7 +373,7 @@ export function createCrmRoutes(
         const fetchRes = await fetch(csvExportUrl);
         if (!fetchRes.ok) {
           return res.status(502).json({
-            error: `Could not fetch sheet (${fetchRes.status}). Make sure the sheet is shared ("Anyone with the link can view") or connect via Google Sign-In.`,
+            error: `Could not fetch sheet (${fetchRes.status}). Make sure the sheet is shared ("Anyone with the link can view").`,
           });
         }
         const fetchedCsv = await fetchRes.text();
@@ -303,7 +445,7 @@ export function createCrmRoutes(
   // Create new production business workspace
   router.post('/businesses', authMiddleware, (req: AuthRequest, res) => {
     if (req.authUser?.isDemoUser) {
-      return res.status(403).json({ error: 'Please sign in with Google to create a production business workspace.' });
+      return res.status(403).json({ error: 'Authentication required to create a production business workspace.' });
     }
 
     const { name, industry, phone, email, website, timezone, defaultCountryCode } = req.body || {};
@@ -1248,15 +1390,16 @@ export function createCrmRoutes(
     res.json({ followUp: db.prepare('SELECT * FROM follow_up_tasks WHERE id = ?').get(taskId) });
   });
 
-  // System Accounts (Manager & Accountant) + Full-Access Email Authorization
+  // System Accounts (Manager & Accountant) + Traditional Username/Password Access
   router.get('/businesses/:businessId/members', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId } = req.params;
     const members = db
       .prepare(`
         SELECT bm.*,
+               u.username,
                u.full_name,
                u.avatar_url,
-               CASE WHEN LOWER(bm.invited_email) = ? THEN 1 ELSE 0 END as is_owner,
+               CASE WHEN LOWER(bm.invited_email) = ? OR LOWER(u.username) = ? THEN 1 ELSE 0 END as is_owner,
                (SELECT COUNT(*) FROM leads l WHERE l.business_id = bm.business_id AND l.assigned_to_user_id = bm.user_id) as total_leads,
                (SELECT COUNT(*) FROM leads l JOIN lead_statuses s ON s.id = l.status_id WHERE l.business_id = bm.business_id AND l.assigned_to_user_id = bm.user_id AND s.is_converted = 1) as converted_leads
         FROM business_memberships bm
@@ -1264,7 +1407,7 @@ export function createCrmRoutes(
         WHERE bm.business_id = ?
         ORDER BY is_owner DESC, bm.created_at ASC
       `)
-      .all(MASTER_OWNER_EMAIL, businessId);
+      .all(MASTER_OWNER_EMAIL, DEFAULT_ADMIN_USERNAME, businessId);
     res.json({ members });
   });
 
@@ -1274,7 +1417,7 @@ export function createCrmRoutes(
     requireBusinessAccess(db, ['super_admin', 'business_admin']),
     (req: AuthRequest, res) => {
       const { businessId } = req.params;
-      const { email, displayName, role, accountSlot } = req.body || {};
+      const { email, username, password, displayName, role, accountSlot } = req.body || {};
       const validSlots = ['manager', 'accountant'];
       const validRoles: Role[] = ['business_admin', 'manager', 'employee'];
       const resolvedSlot: 'manager' | 'accountant' = validSlots.includes(accountSlot)
@@ -1282,30 +1425,74 @@ export function createCrmRoutes(
         : role === 'manager'
           ? 'manager'
           : 'accountant';
-      // When using the 2-account model (accountSlot specified), both Manager & Accountant hold full permissions ('business_admin')
       const resolvedRole: Role = validSlots.includes(accountSlot)
         ? 'business_admin'
         : validRoles.includes(role)
           ? role
           : 'business_admin';
 
-      if (!email || typeof email !== 'string' || !email.includes('@')) {
+      const cleanUsername = typeof username === 'string' ? username.trim().toLowerCase() : '';
+      const rawEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+      if (!rawEmail && !cleanUsername) {
+        return res.status(400).json({ error: 'Username or valid email is required' });
+      }
+      if (rawEmail && !rawEmail.includes('@')) {
         return res.status(400).json({ error: 'Valid email is required' });
       }
 
-      const normalizedEmail = email.trim().toLowerCase();
-      if (normalizedEmail === MASTER_OWNER_EMAIL && !req.authUser?.isOwner) {
-        return res.status(403).json({ error: 'Only the Master Owner can modify the owner account' });
+      const normalizedEmail = rawEmail || `${cleanUsername}@alsafasteel.local`;
+      if ((normalizedEmail === MASTER_OWNER_EMAIL || cleanUsername === DEFAULT_ADMIN_USERNAME) && !req.authUser?.isOwner) {
+        return res.status(403).json({ error: 'Only the Master Owner can modify the admin account' });
       }
 
-      const existingUser = db.prepare('SELECT id, full_name FROM users WHERE LOWER(email) = ?').get(normalizedEmail) as any;
       const now = new Date().toISOString();
-      const id = crypto.randomUUID();
+      let existingUser = (
+        cleanUsername
+          ? db.prepare('SELECT id, full_name, username, email FROM users WHERE LOWER(username) = ? OR LOWER(email) = ?').get(cleanUsername, normalizedEmail)
+          : db.prepare('SELECT id, full_name, username, email FROM users WHERE LOWER(email) = ?').get(normalizedEmail)
+      ) as any;
 
+      const cleanPassword = typeof password === 'string' ? password : '';
+      if (cleanUsername && cleanPassword && !existingUser) {
+        const newUserId = crypto.randomUUID();
+        const label = displayName?.trim() || cleanUsername;
+        db.prepare(`
+          INSERT INTO users (id, firebase_uid, username, password_hash, email, full_name, default_language, theme, is_platform_super_admin, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'ar', 'light', 0, ?, ?)
+        `).run(
+          newUserId,
+          `local-${newUserId}`,
+          cleanUsername,
+          hashPassword(cleanPassword),
+          normalizedEmail,
+          label,
+          now,
+          now
+        );
+        existingUser = { id: newUserId, full_name: label, username: cleanUsername, email: normalizedEmail };
+      } else if (existingUser && (cleanUsername || cleanPassword)) {
+        db.prepare(`
+          UPDATE users
+          SET username = COALESCE(NULLIF(?, ''), username),
+              password_hash = COALESCE(?, password_hash),
+              full_name = COALESCE(NULLIF(?, ''), full_name),
+              updated_at = ?
+          WHERE id = ?
+        `).run(
+          cleanUsername || '',
+          cleanPassword ? hashPassword(cleanPassword) : null,
+          displayName?.trim() || '',
+          now,
+          existingUser.id
+        );
+      }
+
+      const id = crypto.randomUUID();
       db.prepare(`
         INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(business_id, invited_email) DO UPDATE SET
+          user_id = COALESCE(excluded.user_id, business_memberships.user_id),
           account_slot = excluded.account_slot,
           role = excluded.role,
           display_name = COALESCE(NULLIF(excluded.display_name, ''), display_name),
@@ -1316,10 +1503,10 @@ export function createCrmRoutes(
         businessId,
         existingUser?.id || null,
         normalizedEmail,
-        displayName?.trim() || existingUser?.full_name || normalizedEmail.split('@')[0],
-        normalizedEmail === MASTER_OWNER_EMAIL ? 'manager' : resolvedSlot,
-        normalizedEmail === MASTER_OWNER_EMAIL ? 'business_admin' : resolvedRole,
-        existingUser ? 'active' : resolvedSlot ? 'invited' : 'invited',
+        displayName?.trim() || existingUser?.full_name || cleanUsername || normalizedEmail.split('@')[0],
+        normalizedEmail === MASTER_OWNER_EMAIL || cleanUsername === DEFAULT_ADMIN_USERNAME ? 'manager' : resolvedSlot,
+        normalizedEmail === MASTER_OWNER_EMAIL || cleanUsername === DEFAULT_ADMIN_USERNAME ? 'business_admin' : resolvedRole,
+        existingUser ? 'active' : 'invited',
         now,
         now
       );
@@ -1330,13 +1517,19 @@ export function createCrmRoutes(
         action: 'full_access_granted',
         entityType: 'membership',
         entityId: id,
-        details: { email: normalizedEmail, accountSlot: resolvedSlot, role: resolvedRole },
+        details: { email: normalizedEmail, username: cleanUsername || null, accountSlot: resolvedSlot, role: resolvedRole },
         ipAddress: req.ip,
       });
 
       const member = db
-        .prepare('SELECT *, CASE WHEN LOWER(invited_email) = ? THEN 1 ELSE 0 END as is_owner FROM business_memberships WHERE business_id = ? AND LOWER(invited_email) = ?')
-        .get(MASTER_OWNER_EMAIL, businessId, normalizedEmail);
+        .prepare(`
+          SELECT bm.*, u.username, u.full_name,
+                 CASE WHEN LOWER(bm.invited_email) = ? OR LOWER(u.username) = ? THEN 1 ELSE 0 END as is_owner
+          FROM business_memberships bm
+          LEFT JOIN users u ON u.id = bm.user_id
+          WHERE bm.business_id = ? AND LOWER(bm.invited_email) = ?
+        `)
+        .get(MASTER_OWNER_EMAIL, DEFAULT_ADMIN_USERNAME, businessId, normalizedEmail);
       res.status(201).json({ member });
     }
   );
@@ -1347,16 +1540,35 @@ export function createCrmRoutes(
     requireBusinessAccess(db, ['super_admin', 'business_admin']),
     (req: AuthRequest, res) => {
       const { businessId, memberId } = req.params;
-      const { role, status, accountSlot, displayName, email } = req.body || {};
+      const { role, status, accountSlot, displayName, email, username, password } = req.body || {};
       const existingMember = db
         .prepare('SELECT * FROM business_memberships WHERE id = ? AND business_id = ?')
         .get(memberId, businessId) as any;
       if (!existingMember) {
         return res.status(404).json({ error: 'Account membership not found' });
       }
-      const isTargetOwner = existingMember.invited_email?.toLowerCase() === MASTER_OWNER_EMAIL;
+      const existingUser = existingMember.user_id
+        ? (db.prepare('SELECT * FROM users WHERE id = ?').get(existingMember.user_id) as any)
+        : null;
+      const isTargetOwner =
+        existingMember.invited_email?.toLowerCase() === MASTER_OWNER_EMAIL ||
+        existingUser?.username?.toLowerCase() === DEFAULT_ADMIN_USERNAME;
       if (isTargetOwner && (!req.authUser?.isOwner || status === 'inactive')) {
         return res.status(403).json({ error: 'Master Owner account cannot be deactivated or downgraded' });
+      }
+
+      const now = new Date().toISOString();
+      if (existingUser && (password || (username && !isTargetOwner) || displayName)) {
+        const cleanNewUsername = typeof username === 'string' && !isTargetOwner ? username.trim().toLowerCase() : '';
+        const cleanPass = typeof password === 'string' && password.length >= 6 ? hashPassword(password) : null;
+        db.prepare(`
+          UPDATE users
+          SET username = COALESCE(NULLIF(?, ''), username),
+              password_hash = COALESCE(?, password_hash),
+              full_name = COALESCE(NULLIF(?, ''), full_name),
+              updated_at = ?
+          WHERE id = ?
+        `).run(cleanNewUsername, cleanPass, displayName?.trim() || '', now, existingUser.id);
       }
 
       const normalizedNewEmail =
@@ -1383,14 +1595,20 @@ export function createCrmRoutes(
         normalizedNewEmail,
         linkedUser?.id || null,
         isTargetOwner ? 'active' : status || null,
-        new Date().toISOString(),
+        now,
         memberId,
         businessId
       );
       res.json({
         member: db
-          .prepare('SELECT *, CASE WHEN LOWER(invited_email) = ? THEN 1 ELSE 0 END as is_owner FROM business_memberships WHERE id = ?')
-          .get(MASTER_OWNER_EMAIL, memberId),
+          .prepare(`
+            SELECT bm.*, u.username, u.full_name,
+                   CASE WHEN LOWER(bm.invited_email) = ? OR LOWER(u.username) = ? THEN 1 ELSE 0 END as is_owner
+            FROM business_memberships bm
+            LEFT JOIN users u ON u.id = bm.user_id
+            WHERE bm.id = ?
+          `)
+          .get(MASTER_OWNER_EMAIL, DEFAULT_ADMIN_USERNAME, memberId),
       });
     }
   );
@@ -1407,7 +1625,13 @@ export function createCrmRoutes(
       if (!existingMember) {
         return res.status(404).json({ error: 'Account membership not found' });
       }
-      if (existingMember.invited_email?.toLowerCase() === MASTER_OWNER_EMAIL) {
+      const existingUser = existingMember.user_id
+        ? (db.prepare('SELECT username FROM users WHERE id = ?').get(existingMember.user_id) as any)
+        : null;
+      if (
+        existingMember.invited_email?.toLowerCase() === MASTER_OWNER_EMAIL ||
+        existingUser?.username?.toLowerCase() === DEFAULT_ADMIN_USERNAME
+      ) {
         return res.status(403).json({ error: 'Cannot remove the Master Owner account' });
       }
 

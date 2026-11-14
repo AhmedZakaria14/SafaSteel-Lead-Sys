@@ -28,32 +28,21 @@ import {
   VolumeX,
   Crown,
 } from 'lucide-react';
-import { User } from 'firebase/auth';
 import {
-  AccountSlot,
   AnalyticsResponse,
   Business,
   CustomField,
-  FirestoreAuthorizedAccount,
   Language,
   NotificationItem,
   PipelineStage,
   Role,
   TeamMember,
   ThemeMode,
+  UserProfile,
 } from './types/crm';
 import { getT } from './i18n/translations';
-import {
-  formatFirebaseAuthError,
-  getGoogleWorkspaceAccessToken,
-  initFirebaseAuth,
-  isMasterOwnerEmail,
-  logoutFirebase,
-  signInWithGoogleWorkspace,
-  subscribeFirestoreAuthorizedAccounts,
-  syncSignedInUserToFirestore,
-} from './lib/firebase';
-import { apiRequest, setApiContext } from './lib/api';
+import { ALSAFA_WORKSPACE_ID, DEFAULT_ADMIN_USERNAME, MASTER_OWNER_EMAIL } from './lib/firebase';
+import { apiRequest, getAuthToken, onUnauthorized, setAuthToken } from './lib/api';
 import {
   BrowserNotificationSupport,
   ensureNotificationServiceWorker,
@@ -70,7 +59,7 @@ import {
   setNotificationSoundEnabled,
 } from './lib/sound';
 import { ToastProvider, useToast } from './components/ui/ToastProvider';
-import { GoogleSignInButton } from './components/ui/GoogleSignInButton';
+import { LoginScreen } from './components/ui/LoginScreen';
 import { GlobalLeadSearch } from './components/ui/GlobalLeadSearch';
 import { WorkspaceWizardModal } from './components/modals/WorkspaceWizardModal';
 import { CreateLeadModal } from './components/modals/CreateLeadModal';
@@ -102,12 +91,8 @@ function LeadFlowAppInner() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [authUser, setAuthUser] = useState<UserProfile | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [isDemoMode, setIsDemoMode] = useState(true);
-  const [demoRole, setDemoRole] = useState<Role>('business_admin');
-  const [demoAccountSlot, setDemoAccountSlot] = useState<AccountSlot>('manager');
-  const [firestoreAccounts, setFirestoreAccounts] = useState<FirestoreAuthorizedAccount[]>([]);
 
   const [prodBusinesses, setProdBusinesses] = useState<Business[]>([]);
   const [demoBusinesses, setDemoBusinesses] = useState<Business[]>([]);
@@ -163,10 +148,6 @@ function LeadFlowAppInner() {
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
   }, [theme]);
-
-  useEffect(() => {
-    setApiContext({ isDemoMode: !firebaseUser || isDemoMode, demoRole });
-  }, [firebaseUser, isDemoMode, demoRole]);
 
   // Parse deep-link lead/business query parameters or hash on initial load
   useEffect(() => {
@@ -239,65 +220,39 @@ function LeadFlowAppInner() {
     return () => document.removeEventListener('mousedown', onOutside);
   }, [showNotifMenu]);
 
-  // Listen to Firebase Auth state & sync Master Owner / authorized accounts with Cloud Firestore
-  useEffect(() => {
-    const unsub = initFirebaseAuth((user) => {
-      setFirebaseUser(user);
-      setIsDemoMode(!user);
-      setAuthReady(true);
-    });
-    return () => unsub();
-  }, []);
+  const selectPreferredWorkspace = (prodList: Business[], demoList: Business[]) => {
+    const merged = new Map<string, Business>();
+    for (const b of [...prodList, ...demoList]) {
+      if (!merged.has(b.id)) merged.set(b.id, b);
+    }
+    const pool = Array.from(merged.values());
+    const requestedBiz = pendingDeepLinkRef.current?.businessId;
+    if (pool.length > 0) {
+      const alsafa = pool.find((b) => b.id === ALSAFA_WORKSPACE_ID);
+      if (requestedBiz && pool.some((b) => b.id === requestedBiz)) {
+        setActiveBusinessId(requestedBiz);
+      } else {
+        setActiveBusinessId((curr) =>
+          curr && pool.some((b) => b.id === curr) ? curr : (alsafa || pool[0]).id
+        );
+      }
+      setRefreshCounter((c) => c + 1);
+    } else {
+      setActiveBusinessId('');
+    }
+  };
 
-  useEffect(() => {
-    if (!firebaseUser?.email) {
-      setFirestoreAccounts([]);
+  const loadSessionAndWorkspaces = async () => {
+    const token = getAuthToken();
+    if (!token) {
+      setAuthUser(null);
+      setAuthReady(true);
       return;
     }
 
-    let cancelled = false;
-    syncSignedInUserToFirestore(firebaseUser).catch((err) => {
-      console.warn('Firestore user sync warning:', err);
-    });
-
-    const unsubSnap = subscribeFirestoreAuthorizedAccounts(
-      firebaseUser.email,
-      (accounts) => {
-        if (cancelled) return;
-        setFirestoreAccounts(accounts);
-      },
-      (err) => {
-        console.warn('Firestore authorized_emails subscription warning:', err);
-      }
-    );
-
-    return () => {
-      cancelled = true;
-      unsubSnap();
-    };
-  }, [firebaseUser?.uid, firebaseUser?.email]);
-
-  useEffect(() => {
-    if (!firebaseUser || !activeBusinessId || firestoreAccounts.length === 0) return;
-    if (!isMasterOwnerEmail(firebaseUser.email)) return;
-
-    apiRequest(`/businesses/${activeBusinessId}/access-accounts/sync`, {
-      method: 'POST',
-      body: JSON.stringify({ accounts: firestoreAccounts }),
-    })
-      .then(() => {
-        setRefreshCounter((c) => c + 1);
-      })
-      .catch(() => {
-        // ignore background sync retry
-      });
-  }, [firebaseUser?.uid, activeBusinessId, firestoreAccounts.length]);
-
-  const loadSessionAndWorkspaces = async () => {
     try {
-      setApiContext({ isDemoMode: !firebaseUser || isDemoMode, demoRole });
       const res = await apiRequest<{
-        user?: { id?: string };
+        user?: UserProfile;
         businesses?: Business[];
         demoBusinesses?: Business[];
       }>('/me');
@@ -305,47 +260,39 @@ function LeadFlowAppInner() {
       const prodList = Array.isArray(res?.businesses) ? res.businesses : [];
       const demoList = Array.isArray(res?.demoBusinesses) ? res.demoBusinesses : [];
 
+      setAuthUser(res?.user || null);
       setCurrentUserId(res?.user?.id || null);
       setProdBusinesses(prodList);
       setDemoBusinesses(demoList);
-
-      const pool =
-        firebaseUser && !isDemoMode
-          ? prodList.length > 0
-            ? prodList
-            : demoList
-          : demoList;
-      const requestedBiz = pendingDeepLinkRef.current?.businessId;
-      if (pool.length > 0) {
-        const alsafa = pool.find((b) => b.id === 'alsafa-steel-workspace');
-        if (requestedBiz && pool.some((b) => b.id === requestedBiz)) {
-          setActiveBusinessId(requestedBiz);
-        } else {
-          setActiveBusinessId((curr) =>
-            curr && pool.some((b) => b.id === curr) ? curr : (alsafa || pool[0]).id
-          );
-        }
-        setRefreshCounter((c) => c + 1);
-      } else {
-        setActiveBusinessId('');
-      }
-    } catch (err: any) {
-      notify(err.message, 'error');
+      selectPreferredWorkspace(prodList, demoList);
+    } catch {
+      setAuthToken(null);
+      setAuthUser(null);
+      setProdBusinesses([]);
+      setDemoBusinesses([]);
+      setActiveBusinessId('');
+    } finally {
+      setAuthReady(true);
     }
   };
 
   useEffect(() => {
-    if (!authReady) return;
+    onUnauthorized(() => {
+      setAuthUser(null);
+      setCurrentUserId(null);
+      setProdBusinesses([]);
+      setDemoBusinesses([]);
+      setActiveBusinessId('');
+      setSelectedLeadId(null);
+    });
     loadSessionAndWorkspaces();
-  }, [authReady, firebaseUser, isDemoMode]);
+  }, []);
 
-  const allBusinesses = [...prodBusinesses, ...demoBusinesses];
+  const allBusinesses = Array.from(
+    new Map([...prodBusinesses, ...demoBusinesses].map((b) => [b.id, b])).values()
+  );
   const activeBusiness = allBusinesses.find((b) => b.id === activeBusinessId) || null;
-  const effectiveRole: Role = activeBusiness
-    ? activeBusiness.is_demo && !firebaseUser
-      ? demoRole
-      : activeBusiness.member_role || 'business_admin'
-    : 'business_admin';
+  const effectiveRole: Role = activeBusiness?.member_role || 'business_admin';
 
   const loadWorkspaceData = async (bizId: string) => {
     if (!bizId) return;
@@ -475,7 +422,7 @@ function LeadFlowAppInner() {
       pendingDeepLinkRef.current = null;
     }
     loadWorkspaceData(activeBusinessId);
-  }, [activeBusinessId, demoRole]);
+  }, [activeBusinessId]);
 
   // Refresh metrics without resetting selectedLeadId on live sync ticks
   useEffect(() => {
@@ -486,17 +433,16 @@ function LeadFlowAppInner() {
 
   // Real-time Server-Sent Events (SSE) subscription for live notifications, leads & sheet updates
   useEffect(() => {
-    if (!activeBusinessId || !activeBusiness) return;
+    if (!activeBusinessId || !activeBusiness || !authUser) return;
     let closed = false;
     let es: EventSource | null = null;
 
     const connectSse = async () => {
       try {
-        let url = `/api/businesses/${encodeURIComponent(activeBusinessId)}/events`;
-        if (activeBusiness.is_demo !== 1 && firebaseUser) {
-          const token = await firebaseUser.getIdToken();
-          url += `?token=${encodeURIComponent(token)}`;
-        }
+        const token = getAuthToken();
+        const url = `/api/businesses/${encodeURIComponent(activeBusinessId)}/events${
+          token ? `?token=${encodeURIComponent(token)}` : ''
+        }`;
         if (closed) return;
         es = new EventSource(url);
         es.addEventListener('connected', () => {
@@ -572,51 +518,36 @@ function LeadFlowAppInner() {
       setSseConnected(false);
       es?.close();
     };
-  }, [activeBusinessId, activeBusiness?.is_demo, firebaseUser]);
+  }, [activeBusinessId, authUser?.id]);
 
-  // Continuous live polling when connected to a Google Drive Sheet via OAuth token
-  useEffect(() => {
-    if (!activeBusinessId || !sheetStatus?.spreadsheetId || sheetStatus.autoScheduled === false) return;
-    const token = getGoogleWorkspaceAccessToken();
-    if (!token) return;
-
-    const intervalMs = Math.max(10_000, (sheetStatus.syncIntervalSec || 15) * 1000);
-    const timer = setInterval(async () => {
-      const liveToken = getGoogleWorkspaceAccessToken();
-      if (!liveToken) return;
-      try {
-        const res = await apiRequest<{ createdCount: number; updatedCount: number }>(
-          `/businesses/${activeBusinessId}/google/sheets/sync`,
-          {
-            method: 'POST',
-            includeGoogleToken: true,
-            body: JSON.stringify({ direction: 'inbound', silent: true }),
-          }
-        );
-        if (res.createdCount > 0 || res.updatedCount > 0) {
-          setRefreshCounter((c) => c + 1);
-        }
-      } catch {
-        // silent background retry
-      }
-    }, intervalMs);
-
-    return () => clearInterval(timer);
-  }, [activeBusinessId, sheetStatus?.spreadsheetId, sheetStatus?.autoScheduled, sheetStatus?.syncIntervalSec, firebaseUser]);
-
-  const handleGoogleSignIn = async () => {
-    try {
-      await signInWithGoogleWorkspace();
-      setIsDemoMode(false);
-      notify(isAr ? 'تم تسجيل الدخول بنجاح' : 'Signed in with Google Workspace', 'success');
-    } catch (err: unknown) {
-      notify(formatFirebaseAuthError(err, isAr), 'error');
-    }
+  const handleLoginSuccess = (data: {
+    token: string;
+    user: UserProfile;
+    businesses: Business[];
+    demoBusinesses: Business[];
+  }) => {
+    const prodList = Array.isArray(data?.businesses) ? data.businesses : [];
+    const demoList = Array.isArray(data?.demoBusinesses) ? data.demoBusinesses : [];
+    setAuthUser(data.user);
+    setCurrentUserId(data.user.id);
+    setProdBusinesses(prodList);
+    setDemoBusinesses(demoList);
+    selectPreferredWorkspace(prodList, demoList);
+    setAuthReady(true);
+    notify(isAr ? 'تم تسجيل الدخول بنجاح' : 'Signed in successfully', 'success');
   };
 
-  const handleLogout = async () => {
-    await logoutFirebase();
-    setIsDemoMode(true);
+  const handleLogout = () => {
+    setAuthToken(null);
+    setAuthUser(null);
+    setCurrentUserId(null);
+    setProdBusinesses([]);
+    setDemoBusinesses([]);
+    setActiveBusinessId('');
+    setSelectedLeadId(null);
+    setNotifications([]);
+    setUnreadCount(0);
+    setAnalytics(null);
     notify(isAr ? 'تم تسجيل الخروج' : 'Signed out', 'info');
   };
 
@@ -625,7 +556,6 @@ function LeadFlowAppInner() {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    setIsDemoMode(false);
     await loadSessionAndWorkspaces();
     setActiveBusinessId(res.business.id);
     notify(isAr ? 'تم إنشاء مساحة العمل بنجاح' : 'Workspace created', 'success');
@@ -659,34 +589,16 @@ function LeadFlowAppInner() {
     if (!activeBusinessId || syncingNow) return;
     setSyncingNow(true);
     try {
-      const googleToken = getGoogleWorkspaceAccessToken();
-      if (sheetStatus?.spreadsheetId && googleToken) {
-        const res = await apiRequest<{ createdCount: number; updatedCount: number }>(
-          `/businesses/${activeBusinessId}/google/sheets/sync`,
-          {
-            method: 'POST',
-            includeGoogleToken: true,
-            body: JSON.stringify({ direction: 'inbound' }),
-          }
-        );
-        notify(
-          isAr
-            ? `تمت المزامنة: +${res.createdCount} جديد، ${res.updatedCount} محدث`
-            : `Synced: +${res.createdCount} created, ${res.updatedCount} updated`,
-          'success'
-        );
-      } else {
-        const res = await apiRequest<{ createdCount: number; updatedCount: number; totalLeadsInBusiness: number }>(
-          `/businesses/${activeBusinessId}/sheet-source/sync`,
-          { method: 'POST', body: JSON.stringify({}) }
-        );
-        notify(
-          isAr
-            ? `مزامنة الشيت مكتملة (${res.totalLeadsInBusiness} عميل) — +${res.createdCount} جديد`
-            : `Sheet synced (${res.totalLeadsInBusiness} leads) — +${res.createdCount} new`,
-          'success'
-        );
-      }
+      const res = await apiRequest<{ createdCount: number; updatedCount: number; totalLeadsInBusiness: number }>(
+        `/businesses/${activeBusinessId}/sheet-source/sync`,
+        { method: 'POST', body: JSON.stringify({}) }
+      );
+      notify(
+        isAr
+          ? `مزامنة الشيت مكتملة (${res.totalLeadsInBusiness} عميل) — +${res.createdCount} جديد`
+          : `Sheet synced (${res.totalLeadsInBusiness} leads) — +${res.createdCount} new`,
+        'success'
+      );
       setRefreshCounter((c) => c + 1);
     } catch (err: any) {
       notify(err.message, 'error');
@@ -777,6 +689,26 @@ function LeadFlowAppInner() {
     { id: 'settings', label: t.navSettings, icon: Settings },
   ];
 
+  if (!authReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-[#090E1A] text-slate-500 text-xs">
+        {t.loading}
+      </div>
+    );
+  }
+
+  if (!authUser) {
+    return (
+      <LoginScreen
+        lang={lang}
+        theme={theme}
+        onToggleLang={() => setLang((l) => (l === 'ar' ? 'en' : 'ar'))}
+        onToggleTheme={() => setTheme((m) => (m === 'light' ? 'dark' : 'light'))}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen flex bg-slate-50 dark:bg-[#090E1A] text-slate-900 dark:text-slate-100">
       {/* Desktop Collapsible Sidebar */}
@@ -820,30 +752,14 @@ function LeadFlowAppInner() {
               <div className="min-w-0 flex-1">
                 <select
                   value={activeBusinessId}
-                  onChange={(e) => {
-                    const id = e.target.value;
-                    const chosen = allBusinesses.find((b) => b.id === id);
-                    if (chosen) setIsDemoMode(Boolean(chosen.is_demo));
-                    setActiveBusinessId(id);
-                  }}
+                  onChange={(e) => setActiveBusinessId(e.target.value)}
                   className="w-full bg-transparent text-xs font-semibold text-slate-900 dark:text-slate-100 focus:outline-none truncate cursor-pointer"
                 >
-                  {prodBusinesses.length > 0 && (
-                    <optgroup label={t.productionWorkspaces}>
-                      {prodBusinesses.map((b) => (
-                        <option key={b.id} value={b.id} className="bg-white dark:bg-slate-900">
-                          {b.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  <optgroup label={t.demoWorkspaces}>
-                    {demoBusinesses.map((b) => (
-                      <option key={b.id} value={b.id} className="bg-white dark:bg-slate-900">
-                        {b.name}
-                      </option>
-                    ))}
-                  </optgroup>
+                  {allBusinesses.map((b) => (
+                    <option key={b.id} value={b.id} className="bg-white dark:bg-slate-900">
+                      {b.name}
+                    </option>
+                  ))}
                 </select>
                 {activeBusiness && (
                   <div className="text-[11px] text-slate-400 truncate">{activeBusiness.industry}</div>
@@ -851,16 +767,14 @@ function LeadFlowAppInner() {
               </div>
             </div>
 
-            {firebaseUser && (
-              <button
-                type="button"
-                onClick={() => setShowWorkspaceModal(true)}
-                className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>{t.createWorkspace}</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setShowWorkspaceModal(true)}
+              className="w-full inline-flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{t.createWorkspace}</span>
+            </button>
           </div>
         )}
 
@@ -903,11 +817,7 @@ function LeadFlowAppInner() {
             </div>
             <select
               value={activeBusinessId}
-              onChange={(e) => {
-                const chosen = allBusinesses.find((b) => b.id === e.target.value);
-                if (chosen) setIsDemoMode(Boolean(chosen.is_demo));
-                setActiveBusinessId(e.target.value);
-              }}
+              onChange={(e) => setActiveBusinessId(e.target.value)}
               className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2 text-xs font-semibold"
             >
               {allBusinesses.map((b) => (
@@ -1174,29 +1084,25 @@ function LeadFlowAppInner() {
               )}
             </div>
 
-            {firebaseUser ? (
-              <div className="flex items-center gap-2">
-                {isMasterOwnerEmail(firebaseUser.email) && (
-                  <span className="hidden md:inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-900/50 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:text-amber-200">
-                    <Crown className="h-3 w-3" />
-                    <span>{isAr ? 'المالك' : 'Owner'}</span>
-                  </span>
-                )}
-                <span className="hidden sm:inline text-xs font-medium text-slate-700 dark:text-slate-300 max-w-40 truncate">
-                  {firebaseUser.displayName || firebaseUser.email}
+            <div className="flex items-center gap-2">
+              {(authUser.isOwner || authUser.username === DEFAULT_ADMIN_USERNAME || authUser.email?.toLowerCase() === MASTER_OWNER_EMAIL) && (
+                <span className="hidden md:inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-900/50 px-2 py-0.5 text-[11px] font-bold text-amber-800 dark:text-amber-200">
+                  <Crown className="h-3 w-3" />
+                  <span>{isAr ? 'المدير الرئيسي' : 'Owner'}</span>
                 </span>
-                <button
-                  type="button"
-                  onClick={handleLogout}
-                  className="rounded-lg border border-slate-200 dark:border-slate-700 p-2 text-slate-500 hover:text-red-600 hover:bg-slate-50 dark:hover:bg-slate-800"
-                  title={t.signOut}
-                >
-                  <LogOut className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <GoogleSignInButton label={t.signInGoogle} onClick={handleGoogleSignIn} />
-            )}
+              )}
+              <span className="hidden sm:inline font-mono text-xs font-semibold text-slate-700 dark:text-slate-300 max-w-40 truncate" dir="ltr">
+                {authUser.username || authUser.full_name}
+              </span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-lg border border-slate-200 dark:border-slate-700 p-2 text-slate-500 hover:text-red-600 hover:bg-slate-50 dark:hover:bg-slate-800"
+                title={t.signOut}
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
+            </div>
           </div>
         </header>
 
@@ -1225,27 +1131,6 @@ function LeadFlowAppInner() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              {!firebaseUser && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-emerald-800/80 dark:text-emerald-300/80">{t.demoRolePreview}</span>
-                  <select
-                    value={demoAccountSlot}
-                    onChange={(e) => {
-                      const slot = e.target.value as AccountSlot;
-                      setDemoAccountSlot(slot);
-                      setDemoRole('business_admin');
-                    }}
-                    className="rounded border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2 py-0.5 text-xs font-medium"
-                  >
-                    <option value="manager">
-                      {isAr ? 'حساب المدير (صلاحية كاملة)' : 'Manager (Full Access)'}
-                    </option>
-                    <option value="accountant">
-                      {isAr ? 'حساب المحاسب (صلاحية كاملة)' : 'Accountant (Full Access)'}
-                    </option>
-                  </select>
-                </div>
-              )}
               <button
                 type="button"
                 onClick={handleManualSheetSync}
@@ -1286,12 +1171,8 @@ function LeadFlowAppInner() {
               </h2>
               <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
                 {isAr
-                  ? firebaseUser
-                    ? `هذا الحساب (${firebaseUser.email}) غير مفوض حالياً للوصول إلى مساحة عمل الصفا ستيل. اطلب من المالك الرئيسي (azeco77@gmail.com) منحه الإذن الكامل من تبويب الحسابات والصلاحيات، أو أنشئ مساحة عمل مستقلة خاصة بك.`
-                    : 'أنشئ مساحة عمل مستقلة لنشاطك التجاري للبدء في استقبال العملاء وإدارتهم.'
-                  : firebaseUser
-                    ? `This email (${firebaseUser.email}) is not yet authorized for Al-Safa Steel. Ask the Master Owner (azeco77@gmail.com) to grant full access from Accounts & Access, or create your own workspace.`
-                    : 'Create an isolated business workspace to start capturing, organizing, and converting leads.'}
+                  ? 'أنشئ مساحة عمل لنشاطك التجاري أو تواصل مع المدير لتفعيل مساحة الصفا ستيل.'
+                  : 'Create a business workspace to start capturing, organizing, and converting leads.'}
               </p>
               <div className="mt-6 flex flex-wrap justify-center gap-3">
                 <button
@@ -1302,18 +1183,6 @@ function LeadFlowAppInner() {
                   <Plus className="h-4 w-4" />
                   <span>{t.createWorkspace}</span>
                 </button>
-                {demoBusinesses.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsDemoMode(true);
-                      if (demoBusinesses[0]) setActiveBusinessId(demoBusinesses[0].id);
-                    }}
-                    className="rounded-lg border border-slate-200 dark:border-slate-700 px-4 py-2.5 text-sm font-medium"
-                  >
-                    {isAr ? 'استعراض البيانات التجريبية' : 'Explore Demo Workspaces'}
-                  </button>
-                )}
               </div>
             </div>
           ) : selectedLeadId ? (
@@ -1377,11 +1246,9 @@ function LeadFlowAppInner() {
               lang={lang}
               business={activeBusiness}
               userRole={effectiveRole}
-              firebaseUser={firebaseUser}
+              currentUser={authUser}
               members={members}
-              firestoreAccounts={firestoreAccounts}
               onRefresh={() => setRefreshCounter((c) => c + 1)}
-              onGoogleSignIn={handleGoogleSignIn}
               onNotify={notify}
             />
           ) : activeTab === 'integrations' ? (
@@ -1389,7 +1256,6 @@ function LeadFlowAppInner() {
               lang={lang}
               businessId={activeBusiness.id}
               userRole={effectiveRole}
-              onGoogleSignIn={handleGoogleSignIn}
               onLeadsUpdated={() => setRefreshCounter((c) => c + 1)}
               onNotify={notify}
             />

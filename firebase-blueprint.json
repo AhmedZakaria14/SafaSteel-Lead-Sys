@@ -2,10 +2,11 @@
   "entities": {
     "UserProfile": {
       "title": "UserProfile",
-      "description": "Authenticated platform user profile recognized via Google Auth",
+      "description": "Authenticated platform user profile using traditional username and password credentials",
       "type": "object",
       "properties": {
         "uid": { "type": "string", "maxLength": 128 },
+        "username": { "type": "string", "maxLength": 64 },
         "email": { "type": "string", "format": "email", "maxLength": 254 },
         "fullName": { "type": "string", "maxLength": 160 },
         "accountType": { "type": "string", "enum": ["manager", "accountant"] },
@@ -17,7 +18,7 @@
     },
     "AuthorizedEmail": {
       "title": "AuthorizedEmail",
-      "description": "Full-access account authorization granted by the Master Owner (azeco77@gmail.com)",
+      "description": "Full-access account authorization managed by the system owner (admin / azeco77@gmail.com)",
       "type": "object",
       "properties": {
         "email": { "type": "string", "format": "email", "maxLength": 254 },

@@ -20,12 +20,11 @@ import {
   Clock,
   Layers,
   UserCheck,
+  Printer,
 } from 'lucide-react';
 import { CustomField, FollowUpTask, Language, Lead, PipelineStage, Role, TeamMember } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest } from '../../lib/api';
-import { getGoogleWorkspaceAccessToken } from '../../lib/firebase';
-import { ConfirmDialog } from '../ui/ConfirmDialog';
 
 interface LeadDetailViewProps {
   lang: Language;
@@ -106,9 +105,6 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const [newNote, setNewNote] = useState('');
   const [followUpTitle, setFollowUpTitle] = useState('');
   const [followUpDue, setFollowUpDue] = useState('');
-  const [showDocConfirm, setShowDocConfirm] = useState(false);
-  const [creatingDoc, setCreatingDoc] = useState(false);
-  const [createdDocUrl, setCreatedDocUrl] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [answersTab, setAnswersTab] = useState<'structured' | 'raw'>('structured');
   const [updatingStageId, setUpdatingStageId] = useState<string | null>(null);
@@ -227,28 +223,6 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
     }
   };
 
-  const handleCreateGoogleDoc = async () => {
-    setCreatingDoc(true);
-    try {
-      const res = await apiRequest<{ docUrl: string; title: string }>(
-        `/businesses/${businessId}/leads/${leadId}/google-doc`,
-        {
-          method: 'POST',
-          includeGoogleToken: true,
-          body: JSON.stringify({}),
-        }
-      );
-      setCreatedDocUrl(res.docUrl);
-      setShowDocConfirm(false);
-      onNotify(isAr ? 'تم إنشاء مستند جوجل بنجاح' : 'Google Doc created successfully', 'success');
-      await loadDetail();
-    } catch (err: any) {
-      onNotify(err.message, 'error');
-    } finally {
-      setCreatingDoc(false);
-    }
-  };
-
   if (loading || !lead) {
     return (
       <div className="space-y-5 animate-pulse">
@@ -266,7 +240,6 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const primaryPhone = lead.phone_e164 || lead.phone || '';
   const whatsappFormInput = typeof customValues.whatsapp_input === 'string' ? customValues.whatsapp_input : '';
   const whatsappDigits = (primaryPhone || whatsappFormInput).replace(/\D/g, '');
-  const hasGoogleToken = Boolean(getGoogleWorkspaceAccessToken());
 
   const companyName = typeof customValues.company_name === 'string' ? customValues.company_name.trim() : '';
   const jobTitle = typeof customValues.job_title === 'string' ? customValues.job_title.trim() : '';
@@ -406,42 +379,14 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
               )}
               <button
                 type="button"
-                onClick={() => {
-                  if (!hasGoogleToken) {
-                    onNotify(
-                      isAr
-                        ? 'يرجى تسجيل الدخول بحساب جوجل أولاً لإنشاء ملف في مستندات جوجل'
-                        : 'Sign in with Google first to create a Google Doc brief',
-                      'info'
-                    );
-                    return;
-                  }
-                  setShowDocConfirm(true);
-                }}
+                onClick={() => window.print()}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white transition-colors whitespace-nowrap"
               >
-                <FileText className="h-3.5 w-3.5" />
-                <span>{t.createGoogleDoc}</span>
+                <Printer className="h-3.5 w-3.5" />
+                <span>{t.printBrief}</span>
               </button>
             </div>
           </div>
-
-          {createdDocUrl && (
-            <div className="mt-4 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-900 px-4 py-2.5 text-xs">
-              <span className="text-blue-900 dark:text-blue-100 font-medium">
-                {isAr ? 'تم إنشاء مستند العميل في Google Docs بنجاح' : 'Customer brief created in Google Docs'}
-              </span>
-              <a
-                href={createdDocUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-blue-700 dark:text-blue-300 underline"
-              >
-                <span>{isAr ? 'فتح المستند' : 'Open Document'}</span>
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
-            </div>
-          )}
 
           {duplicates.length > 0 && (
             <div className="mt-4 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-900 px-4 py-2.5 text-xs text-amber-800 dark:text-amber-300">
@@ -943,21 +888,6 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
           </div>
         </div>
       </div>
-
-      <ConfirmDialog
-        open={showDocConfirm}
-        title={isAr ? 'تأكيد إنشاء مستند في Google Docs' : 'Confirm Google Docs Creation'}
-        description={
-          isAr
-            ? `سيتم إنشاء مستند جديد في حسابك على Google Docs يحتوي على بيانات العميل "${lead.full_name}" وإجابات النموذج وإسناد الحملة. هل تريد المتابعة؟`
-            : `This will create a new Google Doc in your Google Drive containing customer profile details, form answers, and campaign attribution for "${lead.full_name}". Proceed?`
-        }
-        confirmLabel={t.confirm}
-        cancelLabel={t.cancel}
-        busy={creatingDoc}
-        onConfirm={handleCreateGoogleDoc}
-        onCancel={() => setShowDocConfirm(false)}
-      />
     </div>
   );
 };

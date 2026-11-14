@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { SqlDb, createDefaultStagesForBusiness } from './db.ts';
-import { MASTER_OWNER_EMAIL } from './auth.ts';
+import {
+  DEFAULT_ADMIN_USERNAME,
+  MASTER_OWNER_EMAIL,
+  hashPassword,
+  syncSystemAccountsToFirestore,
+} from './auth.ts';
 import {
   ALSAFA_WORKSPACE_ID,
   ATTACHED_SHEET_PATH,
@@ -15,22 +20,28 @@ const LEGACY_DEMO_USER_EMAILS = [
   'sales2@alsafasteel.local',
 ];
 
+const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_DEFAULT_PASSWORD || 'SafaSteels2026';
+
 const SYSTEM_ACCOUNTS = [
   {
     id: 'alsafa-owner-manager',
+    username: DEFAULT_ADMIN_USERNAME,
     email: MASTER_OWNER_EMAIL,
     full_name: 'حساب المدير (المالك الرئيسي) | Manager (Owner)',
     account_slot: 'manager' as const,
     role: 'business_admin' as const,
     is_platform_super_admin: 1,
+    defaultPassword: DEFAULT_ADMIN_PASSWORD,
   },
   {
     id: 'alsafa-accountant',
+    username: 'accountant',
     email: 'accountant@alsafasteel.local',
     full_name: 'حساب المحاسب (صلاحية كاملة) | Accountant (Full Access)',
     account_slot: 'accountant' as const,
     role: 'business_admin' as const,
     is_platform_super_admin: 0,
+    defaultPassword: DEFAULT_ADMIN_PASSWORD,
   },
 ];
 
@@ -46,29 +57,68 @@ function ensureTwoSystemAccounts(db: SqlDb) {
   }
 
   for (const acct of SYSTEM_ACCOUNTS) {
-    const existingByEmail = db
-      .prepare('SELECT id, firebase_uid FROM users WHERE LOWER(email) = ?')
-      .get(acct.email.toLowerCase()) as { id: string; firebase_uid: string | null } | undefined;
+    const existingByUsername = db
+      .prepare('SELECT id, firebase_uid, password_hash, username FROM users WHERE LOWER(username) = ?')
+      .get(acct.username.toLowerCase()) as
+      | { id: string; firebase_uid: string | null; password_hash: string | null; username: string | null }
+      | undefined;
 
-    let userId = existingByEmail?.id || acct.id;
-    if (!existingByEmail) {
-      const existingById = db.prepare('SELECT id FROM users WHERE id = ?').get(acct.id);
-      if (!existingById) {
-        db.prepare(`
-          INSERT INTO users (id, firebase_uid, email, full_name, default_language, theme, is_platform_super_admin, created_at, updated_at)
-          VALUES (?, ?, ?, ?, 'ar', 'light', ?, ?, ?)
-        `).run(userId, `seed-uid-${acct.id}`, acct.email, acct.full_name, acct.is_platform_super_admin, now, now);
-      }
-    } else if (acct.is_platform_super_admin === 1) {
-      db.prepare('UPDATE users SET is_platform_super_admin = 1, updated_at = ? WHERE id = ?').run(now, userId);
+    const existingByEmail = !existingByUsername
+      ? (db
+          .prepare('SELECT id, firebase_uid, password_hash, username FROM users WHERE LOWER(email) = ?')
+          .get(acct.email.toLowerCase()) as
+          | { id: string; firebase_uid: string | null; password_hash: string | null; username: string | null }
+          | undefined)
+      : undefined;
+
+    const existingById = !existingByUsername && !existingByEmail
+      ? (db
+          .prepare('SELECT id, firebase_uid, password_hash, username FROM users WHERE id = ?')
+          .get(acct.id) as
+          | { id: string; firebase_uid: string | null; password_hash: string | null; username: string | null }
+          | undefined)
+      : undefined;
+
+    const existingUser = existingByUsername || existingByEmail || existingById;
+    const userId = existingUser?.id || acct.id;
+
+    if (!existingUser) {
+      db.prepare(`
+        INSERT INTO users (id, firebase_uid, username, password_hash, email, full_name, default_language, theme, is_platform_super_admin, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'ar', 'light', ?, ?, ?)
+      `).run(
+        userId,
+        `seed-uid-${acct.id}`,
+        acct.username,
+        hashPassword(acct.defaultPassword),
+        acct.email,
+        acct.full_name,
+        acct.is_platform_super_admin,
+        now,
+        now
+      );
+    } else {
+      const nextPasswordHash =
+        existingUser.password_hash && existingUser.password_hash.startsWith('scrypt:')
+          ? existingUser.password_hash
+          : hashPassword(acct.defaultPassword);
+      const nextUsername = existingUser.username || acct.username;
+      const superFlag = acct.is_platform_super_admin === 1 ? 1 : undefined;
+      db.prepare(`
+        UPDATE users
+        SET username = ?,
+            password_hash = ?,
+            is_platform_super_admin = COALESCE(?, is_platform_super_admin),
+            updated_at = ?
+        WHERE id = ?
+      `).run(nextUsername, nextPasswordHash, superFlag ?? null, now, userId);
     }
 
     const existingMembership = db
-      .prepare('SELECT id, user_id, role, status, account_slot FROM business_memberships WHERE business_id = ? AND LOWER(invited_email) = ?')
-      .get(ALSAFA_WORKSPACE_ID, acct.email.toLowerCase()) as any;
+      .prepare('SELECT id, user_id, role, status, account_slot FROM business_memberships WHERE business_id = ? AND (user_id = ? OR LOWER(invited_email) = ?)')
+      .get(ALSAFA_WORKSPACE_ID, userId, acct.email.toLowerCase()) as any;
 
     if (!existingMembership) {
-      // Only seed the default placeholder accountant if no custom accountant account already exists in account_slot = 'accountant'
       if (acct.account_slot === 'accountant') {
         const hasAnyAccountant = db
           .prepare("SELECT id FROM business_memberships WHERE business_id = ? AND account_slot = 'accountant'")
@@ -90,14 +140,16 @@ function ensureTwoSystemAccounts(db: SqlDb) {
         now,
         now
       );
-    } else if (acct.email === MASTER_OWNER_EMAIL) {
+    } else if (acct.username === DEFAULT_ADMIN_USERNAME || acct.email === MASTER_OWNER_EMAIL) {
       db.prepare(`
         UPDATE business_memberships
-        SET user_id = COALESCE(user_id, ?), account_slot = 'manager', role = 'business_admin', status = 'active', updated_at = ?
+        SET user_id = ?, account_slot = 'manager', role = 'business_admin', status = 'active', updated_at = ?
         WHERE id = ?
       `).run(userId, now, existingMembership.id);
     }
   }
+
+  void syncSystemAccountsToFirestore(db);
 }
 
 export function ensureDemoData(db: SqlDb) {

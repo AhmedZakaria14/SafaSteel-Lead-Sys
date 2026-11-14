@@ -31,7 +31,7 @@ service cloud.firestore {
     }
 
     function isOwner() {
-      return isSignedIn() && callerEmail() == 'azeco77@gmail.com';
+      return isSignedIn() && (callerEmail() == 'azeco77@gmail.com' || callerEmail() == 'admin@alsafasteel.local');
     }
 
     function isAuthorizedAccount() {
@@ -50,8 +50,9 @@ service cloud.firestore {
 
     function isValidUserProfile(data) {
       return data.keys().hasAll(['uid', 'email', 'fullName'])
-        && data.keys().hasOnly(['uid', 'email', 'fullName', 'accountType', 'isOwner', 'defaultLanguage', 'theme', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'username', 'email', 'fullName', 'accountType', 'isOwner', 'defaultLanguage', 'theme', 'updatedAt'])
         && data.uid is string && data.uid == request.auth.uid && data.uid.size() <= 128
+        && (!('username' in data) || (data.username is string && data.username.size() >= 1 && data.username.size() <= 64))
         && data.email is string && data.email.size() <= 254
         && data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 160
         && (!('accountType' in data) || (data.accountType is string && data.accountType in ['manager', 'accountant']))
@@ -103,7 +104,7 @@ service cloud.firestore {
         && isValidUserProfile(incoming())
         && incoming().uid == existing().uid
         && incoming().email == existing().email
-        && incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'accountType', 'defaultLanguage', 'theme', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['username', 'fullName', 'accountType', 'defaultLanguage', 'theme', 'updatedAt']);
       allow delete: if false;
     }
 

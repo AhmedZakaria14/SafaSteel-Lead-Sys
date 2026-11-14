@@ -2,13 +2,15 @@
 
 ## 1. Architecture Overview
 - **Frontend**: React 19 + TypeScript + Tailwind CSS v4 + Recharts + XLSX (Arabic RTL default + English LTR switcher, Light & Dark modes).
-- **Backend**: Node.js Express server (`server.ts`) exposing REST APIs, Meta Lead Ads Graph API & Webhook handlers, and Google Workspace (Sheets, Drive, Docs) proxy routes.
-- **Database**: Relational SQL schema (`server/db.ts`) + PostgreSQL/Supabase migration (`migrations/001_initial_schema.sql`) with Row Level Security policies + Firebase Authentication & `firestore.rules`.
+- **Backend**: Node.js Express server (`server.ts`) exposing REST APIs, username/password authentication (`POST /api/auth/login`), Meta Lead Ads Graph API & Webhook handlers, and live Google Sheet CSV sync.
+- **Database**: Relational SQL schema (`server/db.ts`) + PostgreSQL/Supabase migration (`migrations/001_initial_schema.sql`) with Row Level Security policies + Firebase Firestore schema & `firestore.rules`.
 
 ---
 
 ## 2. Environment Variables
 Configure the following secrets in your hosting environment (never commit real secrets):
+- `AUTH_SESSION_SECRET`: Secret key used to sign stateless HMAC-SHA256 session tokens (recommended for production/Vercel).
+- `ADMIN_DEFAULT_PASSWORD`: Optional override for the seeded default account password (defaults to `SafaSteels2026`).
 - `META_APP_SECRET`: Meta App Secret for verifying `X-Hub-Signature-256` on `POST /api/webhooks/meta`.
 - `META_WEBHOOK_VERIFY_TOKEN`: Secret token for Meta webhook subscription handshake (`GET /api/webhooks/meta`).
 - `INTEGRATION_ENCRYPTION_KEY`: 32+ character secret used for AES-256-GCM encryption of stored Meta credentials at rest.
@@ -30,24 +32,23 @@ Configure the following secrets in your hosting environment (never commit real s
 
 ---
 
-## 4. Google Cloud OAuth & Firebase Authorized Domains
-- Client-side Google Sign-In obtains scoped Workspace OAuth access tokens (`spreadsheets`, `drive.readonly`, `documents`) kept strictly in memory (never written to `localStorage`).
-- Tokens are passed to `/api/businesses/:id/google/*` endpoints via `X-Google-Access-Token` headers.
-- Mutating operations (syncing to Google Sheets, generating a Google Doc lead brief) require explicit user confirmation dialogs in the UI.
-- **Custom Hosting Domains (e.g., Vercel)**: Add your production domain (such as `safa-steel-lead-sys.vercel.app`) to **Firebase Console → Project (`reelvision`) → Authentication → Settings → Authorized domains** and to **Google Cloud Console → Credentials → OAuth 2.0 Client (`Authorized JavaScript origins`)** to prevent `auth/unauthorized-domain` errors.
-- **Vercel Serverless & Rewrites**: Keep Node.js `22.x` selected in Vercel Project Settings (`node:sqlite` support) and ensure `vercel.json` excludes `/api/*` from the SPA `index.html` rewrite so `api/[...path].ts` serves JSON responses.
+## 4. Traditional Username & Password Authentication
+- Users sign in via `POST /api/auth/login` using username and password (no external Google OAuth popups or domain allowlists required, works cleanly on any Vercel/custom domain).
+- Seeded Manager account (`admin`) and Accountant account (`accountant`) are automatically provisioned in the database with full access to `alsafa-steel-workspace`.
+- Passwords are hashed with `scrypt` + per-user random salt, verified via `crypto.timingSafeEqual`.
+- Signed stateless session tokens (`lf1.*`) survive serverless cold starts on Vercel seamlessly.
 
 ---
 
 ## 5. Production Security Checklist
-- [x] Firebase ID Token verification on all authenticated `/api/*` endpoints.
+- [x] Salted `scrypt` password hashing & signed HMAC-SHA256 Bearer tokens on all authenticated `/api/*` endpoints.
 - [x] Strict tenant isolation (`requireBusinessAccess`) preventing cross-business data access.
 - [x] Server-enforced RBAC (`super_admin`, `business_admin`, `manager`, `employee`).
-- [x] Demo Mode workspaces (`is_demo = 1`) isolated from production workspaces (`is_demo = 0`).
+- [x] Protected primary Manager (`admin`) account and two-account full-access architecture.
 - [x] AES-256-GCM encryption at rest for Meta tokens (`integration_credentials` never returned to browser).
 - [x] HMAC-SHA256 signature verification (`X-Hub-Signature-256`) on Meta webhooks.
 - [x] API rate limiting & audit logging (`audit_logs`).
-- [ ] Review and harden `firestore.rules` before broad public distribution.
+- [x] Validated `firestore.rules` deployed to project `reelvision`.
 
 ---
 

@@ -1,44 +1,55 @@
-import { getFirebaseIdToken, getGoogleWorkspaceAccessToken } from './firebase';
-import { Role } from '../types/crm';
+const AUTH_TOKEN_KEY = 'leadflow_auth_token';
 
-export interface ApiContext {
-  isDemoMode: boolean;
-  demoRole?: Role;
+let inMemoryToken: string | null = null;
+let unauthorizedHandler: (() => void) | null = null;
+
+export function getAuthToken(): string | null {
+  if (inMemoryToken) return inMemoryToken;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const stored = window.localStorage.getItem(AUTH_TOKEN_KEY);
+      if (stored) {
+        inMemoryToken = stored;
+        return stored;
+      }
+    }
+  } catch {
+    // ignore storage access errors
+  }
+  return null;
 }
 
-let apiContext: ApiContext = {
-  isDemoMode: true,
-  demoRole: 'business_admin',
-};
+export function setAuthToken(token: string | null): void {
+  inMemoryToken = token;
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      if (token) {
+        window.localStorage.setItem(AUTH_TOKEN_KEY, token);
+      } else {
+        window.localStorage.removeItem(AUTH_TOKEN_KEY);
+      }
+    }
+  } catch {
+    // ignore storage access errors
+  }
+}
 
-export function setApiContext(ctx: ApiContext) {
-  apiContext = ctx;
+export function onUnauthorized(handler: () => void): void {
+  unauthorizedHandler = handler;
 }
 
 export async function apiRequest<T = any>(
   path: string,
-  options: RequestInit & { includeGoogleToken?: boolean; expectBlob?: boolean } = {}
+  options: RequestInit & { expectBlob?: boolean; skipAuthRedirect?: boolean } = {}
 ): Promise<T> {
   const headers = new Headers(options.headers || {});
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
 
-  const idToken = await getFirebaseIdToken();
-  if (idToken) {
-    headers.set('Authorization', `Bearer ${idToken}`);
-  } else if (apiContext.isDemoMode) {
-    headers.set('X-Demo-Session', 'true');
-    if (apiContext.demoRole) {
-      headers.set('X-Demo-Role', apiContext.demoRole);
-    }
-  }
-
-  if (options.includeGoogleToken) {
-    const googleToken = getGoogleWorkspaceAccessToken();
-    if (googleToken) {
-      headers.set('X-Google-Access-Token', googleToken);
-    }
+  const token = getAuthToken();
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
   }
 
   const res = await fetch(`/api${path}`, {
@@ -53,6 +64,10 @@ export async function apiRequest<T = any>(
       const errData = await res.json().catch(() => ({}));
       message = errData.error || message;
     }
+    if (res.status === 401 && !options.skipAuthRedirect && !path.startsWith('/auth/login')) {
+      setAuthToken(null);
+      unauthorizedHandler?.();
+    }
     throw new Error(message);
   }
 
@@ -64,20 +79,5 @@ export async function apiRequest<T = any>(
     return (await res.json()) as T;
   }
 
-  const rawText = await res.text().catch(() => '');
-  const trimmed = rawText.trim();
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-    try {
-      return JSON.parse(trimmed) as T;
-    } catch {
-      // fall through to descriptive non-JSON error
-    }
-  }
-
-  const looksLikeHtml = contentType.includes('text/html') || trimmed.startsWith('<');
-  throw new Error(
-    looksLikeHtml
-      ? `API endpoint (/api${path}) returned HTML instead of JSON (${res.status}). Check Vercel rewrites and serverless deployment.`
-      : `API endpoint (/api${path}) returned non-JSON response (${res.status}, ${contentType || 'unknown'})`
-  );
+  throw new Error('API endpoint returned non-JSON response');
 }
