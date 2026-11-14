@@ -30,10 +30,11 @@ Configure the following secrets in your hosting environment (never commit real s
 
 ---
 
-## 4. Google Cloud OAuth (Google Sheets, Drive & Docs)
+## 4. Google Cloud OAuth & Firebase Authorized Domains
 - Client-side Google Sign-In obtains scoped Workspace OAuth access tokens (`spreadsheets`, `drive.readonly`, `documents`) kept strictly in memory (never written to `localStorage`).
 - Tokens are passed to `/api/businesses/:id/google/*` endpoints via `X-Google-Access-Token` headers.
 - Mutating operations (syncing to Google Sheets, generating a Google Doc lead brief) require explicit user confirmation dialogs in the UI.
+- **Custom Hosting Domains (e.g., Vercel)**: Add your production domain (such as `safa-steel-lead-sys.vercel.app`) to **Firebase Console → Project (`reelvision`) → Authentication → Settings → Authorized domains** and to **Google Cloud Console → Credentials → OAuth 2.0 Client (`Authorized JavaScript origins`)** to prevent `auth/unauthorized-domain` errors.
 
 ---
 

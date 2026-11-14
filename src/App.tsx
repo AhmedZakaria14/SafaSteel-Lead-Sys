@@ -40,7 +40,13 @@ import {
   ThemeMode,
 } from './types/crm';
 import { getT } from './i18n/translations';
-import { getGoogleWorkspaceAccessToken, initFirebaseAuth, logoutFirebase, signInWithGoogleWorkspace } from './lib/firebase';
+import {
+  formatFirebaseAuthError,
+  getGoogleWorkspaceAccessToken,
+  initFirebaseAuth,
+  logoutFirebase,
+  signInWithGoogleWorkspace,
+} from './lib/firebase';
 import { apiRequest, setApiContext } from './lib/api';
 import {
   BrowserNotificationSupport,
@@ -538,8 +544,8 @@ function LeadFlowAppInner() {
       await signInWithGoogleWorkspace();
       setIsDemoMode(false);
       notify(isAr ? 'تم تسجيل الدخول بنجاح' : 'Signed in with Google Workspace', 'success');
-    } catch (err: any) {
-      notify(err.message || 'Sign in failed', 'error');
+    } catch (err: unknown) {
+      notify(formatFirebaseAuthError(err, isAr), 'error');
     }
   };
 

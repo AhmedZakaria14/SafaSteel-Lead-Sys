@@ -51,3 +51,30 @@ export async function logoutFirebase(): Promise<void> {
   cachedGoogleAccessToken = null;
   await signOut(auth);
 }
+
+export function formatFirebaseAuthError(err: unknown, isAr: boolean): string {
+  const code = (err as { code?: string })?.code || '';
+  const message = err instanceof Error ? err.message : String(err || '');
+
+  if (code === 'auth/unauthorized-domain' || message.includes('auth/unauthorized-domain')) {
+    const host = typeof window !== 'undefined' ? window.location.hostname : 'this domain';
+    const projectId = firebaseConfig.projectId || 'Firebase';
+    return isAr
+      ? `النطاق (${host}) غير مصرح به في Firebase Auth. أضف "${host}" في Firebase Console ← Authentication ← Settings ← Authorized domains (مشروع ${projectId}).`
+      : `Domain (${host}) is not authorized in Firebase Auth. Add "${host}" in Firebase Console → Authentication → Settings → Authorized domains (project ${projectId}).`;
+  }
+
+  if (code === 'auth/popup-blocked') {
+    return isAr
+      ? 'منع المتصفح نافذة تسجيل الدخول المنبثقة — اسمح بالـ Popups ثم أعد المحاولة.'
+      : 'Sign-in popup was blocked by your browser — please allow popups and try again.';
+  }
+
+  if (code === 'auth/popup-closed-by-user') {
+    return isAr
+      ? 'تم إغلاق نافذة تسجيل الدخول قبل إكمال الدخول.'
+      : 'Sign-in popup was closed before completing authentication.';
+  }
+
+  return message || (isAr ? 'فشل تسجيل الدخول' : 'Sign in failed');
+}
