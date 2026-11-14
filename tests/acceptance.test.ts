@@ -1,0 +1,335 @@
+import { describe, it, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import http from 'node:http';
+import { createDatabase } from '../server/db.ts';
+import { buildApp } from '../server.ts';
+
+process.env.NODE_ENV = 'test';
+process.env.META_APP_SECRET = 'test_meta_app_secret_123';
+process.env.META_WEBHOOK_VERIFY_TOKEN = 'test_verify_token_abc';
+
+describe('LeadFlow CRM Acceptance Tests', () => {
+  let server: http.Server;
+  let baseUrl = '';
+  const db = createDatabase(':memory:');
+
+  const mockTokenVerifier = async (token: string) => {
+    if (token === 'token-admin-a') {
+      return { uid: 'uid-admin-a', email: 'admin-a@example.com', name: 'Admin A' };
+    }
+    if (token === 'token-emp-a') {
+      return { uid: 'uid-emp-a', email: 'emp-a@example.com', name: 'Employee A' };
+    }
+    if (token === 'token-user-b') {
+      return { uid: 'uid-user-b', email: 'user-b@example.com', name: 'User B' };
+    }
+    throw new Error('Invalid test token');
+  };
+
+  before(async () => {
+    const app = buildApp({ db, tokenVerifier: mockTokenVerifier });
+    await new Promise<void>((resolve) => {
+      server = app.listen(0, '127.0.0.1', () => {
+        const addr = server.address() as any;
+        baseUrl = `http://127.0.0.1:${addr.port}`;
+        resolve();
+      });
+    });
+  });
+
+  after(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  async function api(path: string, token: string | null, init: RequestInit = {}) {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init.headers as Record<string, string>),
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const res = await fetch(`${baseUrl}/api${path}`, { ...init, headers });
+    const data = await res.json().catch(() => ({}));
+    return { status: res.status, data };
+  }
+
+  let businessAId = '';
+  let businessBId = '';
+  let leadId = '';
+  let empAUserId = '';
+
+  it('1-4. Creates business workspace, invites employee, and activates employee on sign-in', async () => {
+    const meAdmin = await api('/me', 'token-admin-a');
+    assert.equal(meAdmin.status, 200);
+
+    const bizRes = await api('/businesses', 'token-admin-a', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Alpha Solutions', industry: 'Services' }),
+    });
+    assert.equal(bizRes.status, 201);
+    businessAId = bizRes.data.business.id;
+
+    const inviteRes = await api(`/businesses/${businessAId}/members/invite`, 'token-admin-a', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'emp-a@example.com', displayName: 'Employee A', role: 'employee' }),
+    });
+    assert.equal(inviteRes.status, 201);
+    assert.equal(inviteRes.data.member.status, 'invited');
+
+    // Employee signs in -> auto-activates membership
+    const meEmp = await api('/me', 'token-emp-a');
+    assert.equal(meEmp.status, 200);
+    assert.equal(meEmp.data.businesses.length, 1);
+    assert.equal(meEmp.data.businesses[0].id, businessAId);
+    empAUserId = meEmp.data.user.id;
+  });
+
+  it('6-11. Creates lead, assigns employee, updates status, schedules follow-up, and updates analytics', async () => {
+    const leadRes = await api(`/businesses/${businessAId}/leads`, 'token-admin-a', {
+      method: 'POST',
+      body: JSON.stringify({
+        fullName: 'Samir Hassan',
+        phone: '0501234567',
+        email: 'samir@client.com',
+        interestedService: 'Consulting Package',
+        campaignName: 'Q4 Search',
+      }),
+    });
+    assert.equal(leadRes.status, 201);
+    leadId = leadRes.data.lead.id;
+
+    // Assign to Employee A
+    const assignRes = await api(`/businesses/${businessAId}/leads/${leadId}/assign`, 'token-admin-a', {
+      method: 'POST',
+      body: JSON.stringify({ assignedToUserId: empAUserId }),
+    });
+    assert.equal(assignRes.status, 200);
+
+    // Employee A changes status
+    const stagesRes = await api(`/businesses/${businessAId}/stages`, 'token-emp-a');
+    const convertedStage = stagesRes.data.stages.find((s: any) => s.is_converted === 1);
+    assert.ok(convertedStage);
+
+    const statusRes = await api(`/businesses/${businessAId}/leads/${leadId}/status`, 'token-emp-a', {
+      method: 'POST',
+      body: JSON.stringify({ statusId: convertedStage.id }),
+    });
+    assert.equal(statusRes.status, 200);
+
+    // Employee A schedules follow-up
+    const fuRes = await api(`/businesses/${businessAId}/follow-ups`, 'token-emp-a', {
+      method: 'POST',
+      body: JSON.stringify({
+        leadId,
+        title: 'Onboarding Kickoff Call',
+        dueAt: new Date(Date.now() + 3600_000).toISOString(),
+      }),
+    });
+    assert.equal(fuRes.status, 201);
+
+    // Verify activity timeline recorded creation, assignment, status change, and follow-up
+    const detail = await api(`/businesses/${businessAId}/leads/${leadId}`, 'token-emp-a');
+    assert.equal(detail.status, 200);
+    assert.ok(detail.data.activities.length >= 4);
+    assert.ok(detail.data.statusHistory.length >= 1);
+
+    // Verify analytics reflect converted lead
+    const analytics = await api(`/businesses/${businessAId}/analytics`, 'token-admin-a');
+    assert.equal(analytics.data.summary.total, 1);
+    assert.equal(analytics.data.summary.converted, 1);
+    assert.equal(analytics.data.summary.conversionRate, 100);
+  });
+
+  it('12-13. Verifies Meta webhook signature, imports lead once, and deduplicates repeat leadgen_id', async () => {
+    const verifyRes = await fetch(
+      `${baseUrl}/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=test_verify_token_abc&hub.challenge=CHALLENGE_OK`
+    );
+    assert.equal(verifyRes.status, 200);
+    assert.equal(await verifyRes.text(), 'CHALLENGE_OK');
+
+    const payload = JSON.stringify({
+      entry: [
+        {
+          id: 'page_123',
+          changes: [
+            {
+              field: 'leadgen',
+              value: {
+                leadgen_id: 'lg_unique_999',
+                form_id: 'frm_123',
+                page_id: 'page_123',
+                business_id: businessAId,
+                campaign_name: 'Meta Instant Campaign',
+                field_data: [
+                  { name: 'full_name', values: ['Nadia Mansour'] },
+                  { name: 'phone_number', values: ['+966559988776'] },
+                  { name: 'email', values: ['nadia@example.com'] },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    // Bad signature rejected
+    const badRes = await fetch(`${baseUrl}/api/webhooks/meta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': 'sha256=deadbeef' },
+      body: payload,
+    });
+    assert.equal(badRes.status, 401);
+
+    // Valid HMAC signature accepted
+    const sig =
+      'sha256=' + crypto.createHmac('sha256', 'test_meta_app_secret_123').update(Buffer.from(payload)).digest('hex');
+
+    const ok1 = await fetch(`${baseUrl}/api/webhooks/meta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': sig },
+      body: payload,
+    });
+    const d1 = await ok1.json();
+    assert.equal(ok1.status, 200);
+    assert.equal(d1.results[0].status, 'created');
+
+    // Duplicate delivery deduplicated
+    const ok2 = await fetch(`${baseUrl}/api/webhooks/meta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': sig },
+      body: payload,
+    });
+    const d2 = await ok2.json();
+    assert.equal(ok2.status, 200);
+    assert.equal(d2.results[0].status, 'deduplicated');
+  });
+
+  it('15. Enforces strict cross-tenant isolation and RBAC', async () => {
+    const bizBRes = await api('/businesses', 'token-user-b', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Beta Corp', industry: 'Retail' }),
+    });
+    assert.equal(bizBRes.status, 201);
+    businessBId = bizBRes.data.business.id;
+
+    // User B cannot read Business A leads
+    const crossRead = await api(`/businesses/${businessAId}/leads/${leadId}`, 'token-user-b');
+    assert.equal(crossRead.status, 403);
+
+    // Employee A cannot invite employees
+    const empInvite = await api(`/businesses/${businessAId}/members/invite`, 'token-emp-a', {
+      method: 'POST',
+      body: JSON.stringify({ email: 'rogue@example.com', role: 'business_admin' }),
+    });
+    assert.equal(empInvite.status, 403);
+
+    // Employee A cannot access Meta-captured unassigned lead in Business A
+    const listEmp = await api(`/businesses/${businessAId}/leads`, 'token-emp-a');
+    assert.equal(listEmp.data.total, 1); // Only the 1 lead assigned to Employee A, not the unassigned Meta lead
+    assert.notEqual(businessAId, businessBId);
+  });
+
+  it('16. Seeds only Al-Safa Steel from attached CSV sheet and syncs incremental new rows without duplicates', async () => {
+    const res = await fetch(`${baseUrl}/api/me`, {
+      headers: { 'x-demo-session': 'true' },
+    });
+    assert.equal(res.status, 200);
+    const meData = await res.json();
+    assert.equal(meData.demoBusinesses.length, 1);
+    assert.equal(meData.demoBusinesses[0].id, 'alsafa-steel-workspace');
+
+    const leadsRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/leads?pageSize=20`, {
+      headers: { 'x-demo-session': 'true' },
+    });
+    assert.equal(leadsRes.status, 200);
+    const leadsData = await leadsRes.json();
+    assert.ok(leadsData.total > 200, `Expected >200 real sheet leads, got ${leadsData.total}`);
+
+    // Verify p: prefix was stripped and dummy Meta test lead was excluded
+    const firstLead = leadsData.leads[0];
+    assert.ok(firstLead.phone_e164 && !firstLead.phone_e164.includes('p:'));
+    const dummySearch = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads?q=${encodeURIComponent('dummy data')}`,
+      { headers: { 'x-demo-session': 'true' } }
+    );
+    const dummyJson = await dummySearch.json();
+    assert.equal(dummyJson.total, 0);
+
+    // Re-syncing identical attached sheet yields 0 created
+    const reSyncRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/sheet-source/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-demo-session': 'true' },
+      body: JSON.stringify({}),
+    });
+    assert.equal(reSyncRes.status, 200);
+    const reSyncJson = await reSyncRes.json();
+    assert.equal(reSyncJson.createdCount, 0);
+
+    // Incremental CSV sync with 1 brand-new lead row imports exactly 1 new lead
+    const newCsvRow = [
+      'id,created_time,ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,form_id,form_name,is_organic,platform,اختر_المنتجات_المرغوبة,اكتب_الكمية_أو_المقاسات_المطلوبة_إن_وجدت,اكتب_رقم_الهاتف/الواتساب_لإرسال_عرض_السعر,full_name,email,phone_number,company_name,job_title,inbox_url,lead_status',
+      'l:999999999999991,2026-11-14T08:30:00+02:00,ag:1,إعلان التريهات ليد - الصفا ستيل,as:1,مجموعة التريهات - الصفا ستيل,c:1,كامبين الصفا ستيل الليد 2026,f:1,Form عامة الصفا ستيل,false,fb,حوامل_الكابلات_cable_trays,50 متر 20*10,01001234567,طارق السعيد,tarek@testco.eg,p:+201001234567,شركة النيل الهندسية,مهندس كهرباء,https://business.facebook.com/latest/123,QUALIFIED',
+    ].join('\n');
+
+    const incRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/sheet-source/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-demo-session': 'true' },
+      body: JSON.stringify({ csvText: newCsvRow }),
+    });
+    assert.equal(incRes.status, 200);
+    const incJson = await incRes.json();
+    assert.equal(incJson.createdCount, 1);
+    assert.equal(incJson.totalLeadsInBusiness, leadsData.total + 1);
+  });
+
+  it('17. Automatically emits lead-linked notifications on new leads/actions, marks single notification read, and searches leads by digits', async () => {
+    // Search with Arabic numerals and stripped phone format
+    const searchRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads?q=${encodeURIComponent('٠١٠٠١٢٣٤٥٦٧')}`,
+      { headers: { 'x-demo-session': 'true' } }
+    );
+    assert.equal(searchRes.status, 200);
+    const searchJson = await searchRes.json();
+    assert.ok(searchJson.total >= 1);
+    const targetLead = searchJson.leads[0];
+
+    // Add note -> creates notification pointing directly to /leads/:id
+    const noteRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${targetLead.id}/notes`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-demo-session': 'true' },
+        body: JSON.stringify({ content: 'تأكيد إرسال عرض السعر للعميل' }),
+      }
+    );
+    assert.equal(noteRes.status, 201);
+
+    // Fetch notifications & verify lead link_path
+    const notifRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/notifications`,
+      { headers: { 'x-demo-session': 'true' } }
+    );
+    assert.equal(notifRes.status, 200);
+    const notifJson = await notifRes.json();
+    const noteNotif = notifJson.notifications.find(
+      (n: any) => n.type === 'note_added' && n.link_path === `/leads/${targetLead.id}`
+    );
+    assert.ok(noteNotif, 'Expected note_added notification linking directly to lead');
+
+    // Mark single notification read
+    const readRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/notifications/${noteNotif.id}/read`,
+      { method: 'PATCH', headers: { 'x-demo-session': 'true' } }
+    );
+    assert.equal(readRes.status, 200);
+
+    // Trigger test push notification -> links to latest lead
+    const testNotifRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/notifications/test`,
+      { method: 'POST', headers: { 'x-demo-session': 'true' } }
+    );
+    assert.equal(testNotifRes.status, 200);
+    const testNotifJson = await testNotifRes.json();
+    assert.ok(testNotifJson.notification.link_path.startsWith('/leads/'));
+  });
+});

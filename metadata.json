@@ -1,0 +1,6 @@
+{
+  "name": "LeadFlow CRM",
+  "description": "Multi-business lead management CRM platform with Meta Lead Ads webhooks, Google Sheets bidirectional sync, Google Drive & Docs integration, customizable pipelines, and bilingual RTL/LTR analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
