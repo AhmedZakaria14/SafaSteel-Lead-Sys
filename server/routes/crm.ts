@@ -29,14 +29,19 @@ import { resetDemoData } from '../seedDemo.ts';
 import {
   ALSAFA_WORKSPACE_ID,
   ATTACHED_SHEET_PATH,
+  DEFAULT_ALSAFA_CSV_URL,
+  DEFAULT_ALSAFA_SHEET_URL,
+  DEFAULT_ALSAFA_SPREADSHEET_ID,
   addSseClient,
   broadcastWorkspaceEvent,
   extractGoogleSheetCsvUrl,
+  getWorkspaceSheetSyncRuntimeState,
   normalizeArabicDigits,
   parseCsvRows,
   removeSseClient,
   syncAttachedSheetToWorkspace,
   syncSheetRowsToWorkspace,
+  syncWorkspaceFromConfiguredSheet,
 } from '../services/sheetSyncService.ts';
 import { createAndBroadcastNotification } from '../services/notificationService.ts';
 
@@ -333,119 +338,93 @@ export function createCrmRoutes(
       .prepare("SELECT status, display_name, config_json, last_sync_at, last_error FROM integrations WHERE business_id = ? AND provider = 'google_sheets'")
       .get(businessId) as any;
     const totalRow = db.prepare('SELECT COUNT(*) as cnt FROM leads WHERE business_id = ?').get(businessId) as { cnt: number };
+    const knownRow = db
+      .prepare('SELECT COUNT(*) as cnt FROM known_sheet_leads WHERE business_id = ?')
+      .get(businessId) as { cnt: number };
     const cfg = integ ? JSON.parse(integ.config_json || '{}') : {};
     const attachedExists = fs.existsSync(ATTACHED_SHEET_PATH);
     const attachedStat = attachedExists ? fs.statSync(ATTACHED_SHEET_PATH) : null;
+    const runtime = getWorkspaceSheetSyncRuntimeState(businessId);
+    const isAlSafa = businessId === ALSAFA_WORKSPACE_ID;
 
     res.json({
       attachedSheetExists: attachedExists,
       attachedSheetName: cfg.attachedSheetName || 'الصفا ستيل غرابيل وحوامل كابلات',
       attachedSheetUpdatedAt: attachedStat ? attachedStat.mtime.toISOString() : null,
-      status: integ?.status || 'pending_config',
-      displayName: integ?.display_name || null,
-      lastSyncAt: integ?.last_sync_at || null,
-      lastError: integ?.last_error || null,
-      publicCsvUrl: cfg.publicCsvUrl || null,
-      spreadsheetId: cfg.spreadsheetId || null,
-      spreadsheetName: cfg.spreadsheetName || null,
+      status: runtime.lastError ? 'error' : integ?.status || (isAlSafa ? 'connected' : 'pending_config'),
+      displayName: integ?.display_name || (isAlSafa ? 'الصفا ستيل غرابيل وحوامل كابلات (Live Sheet Sync)' : null),
+      lastSyncAt: runtime.lastSuccessAt || integ?.last_sync_at || null,
+      lastAttemptAt: runtime.lastAttemptAt,
+      lastSyncDurationMs: runtime.lastSyncDurationMs,
+      lastError: runtime.lastError || integ?.last_error || null,
+      isSyncing: runtime.isSyncing,
+      consecutiveFailures: runtime.consecutiveFailures,
+      lastCreatedCount: runtime.lastCreatedCount,
+      lastUpdatedCount: runtime.lastUpdatedCount,
+      lastNewLeads: runtime.lastNewLeads,
+      publicCsvUrl: cfg.publicCsvUrl || (isAlSafa ? DEFAULT_ALSAFA_CSV_URL : null),
+      sheetUrl: cfg.sheetUrl || (isAlSafa ? DEFAULT_ALSAFA_SHEET_URL : null),
+      spreadsheetId: cfg.spreadsheetId || (isAlSafa ? DEFAULT_ALSAFA_SPREADSHEET_ID : null),
+      spreadsheetName: cfg.spreadsheetName || (isAlSafa ? 'الصفا ستيل غرابيل وحوامل كابلات' : null),
       sheetTitle: cfg.sheetTitle || null,
       autoScheduled: cfg.autoScheduled !== false,
-      syncIntervalSec: cfg.syncIntervalSec || 15,
+      syncIntervalSec: Number(cfg.syncIntervalSec || 15),
       totalLeads: totalRow.cnt,
+      knownLeadsCount: knownRow?.cnt || totalRow.cnt,
     });
   });
 
   router.post('/businesses/:businessId/sheet-source/sync', authMiddleware, requireBusinessAccess(db), async (req: AuthRequest, res) => {
     const { businessId } = req.params;
-    const { mode, csvText, sheetUrl, autoScheduled } = req.body || {};
+    const { mode, csvText, sheetUrl, autoScheduled, silent, source } = req.body || {};
 
     try {
-      let result;
-      if (typeof csvText === 'string' && csvText.trim()) {
-        const rows = parseCsvRows(csvText);
-        result = syncSheetRowsToWorkspace(db, {
-          businessId,
-          rows,
-          sourceLabel: 'csv_upload_sync',
-          conflictPolicy: 'sheet_wins',
-          actorUserId: req.authUser?.id || null,
-          recordSyncLog: true,
-          emitNotificationOnChanges: true,
-        });
-      } else if (typeof sheetUrl === 'string' && sheetUrl.trim()) {
-        const csvExportUrl = extractGoogleSheetCsvUrl(sheetUrl);
-        if (!csvExportUrl) {
-          return res.status(400).json({ error: 'Invalid Google Sheets or CSV URL' });
-        }
-        const fetchRes = await fetch(csvExportUrl);
-        if (!fetchRes.ok) {
-          return res.status(502).json({
-            error: `Could not fetch sheet (${fetchRes.status}). Make sure the sheet is shared ("Anyone with the link can view").`,
-          });
-        }
-        const fetchedCsv = await fetchRes.text();
-        const rows = parseCsvRows(fetchedCsv);
-        if (rows.length < 2) {
-          return res.status(400).json({ error: 'Sheet appears empty or unreadable as CSV' });
-        }
-
-        // Persist publicCsvUrl in integrations config for 15s background polling
-        const now = new Date().toISOString();
+      if (typeof autoScheduled === 'boolean') {
         const existing = db
           .prepare("SELECT id, config_json FROM integrations WHERE business_id = ? AND provider = 'google_sheets'")
           .get(businessId) as { id: string; config_json: string } | undefined;
-        const integId = existing?.id || crypto.randomUUID();
-        const prevCfg = existing ? JSON.parse(existing.config_json || '{}') : {};
-        const nextCfg = {
-          ...prevCfg,
-          publicCsvUrl: csvExportUrl,
-          sheetUrl: sheetUrl.trim(),
-          autoScheduled: autoScheduled !== undefined ? Boolean(autoScheduled) : true,
-          conflictPolicy: 'sheet_wins',
-        };
-        db.prepare(`
-          INSERT INTO integrations (id, business_id, provider, status, display_name, config_json, last_sync_at, last_error, created_at, updated_at)
-          VALUES (?, ?, 'google_sheets', 'connected', 'Google Sheet (Live CSV Sync)', ?, ?, NULL, ?, ?)
-          ON CONFLICT(business_id, provider) DO UPDATE SET
-            status = 'connected',
-            display_name = excluded.display_name,
-            config_json = excluded.config_json,
-            last_sync_at = excluded.last_sync_at,
-            last_error = NULL,
-            updated_at = excluded.updated_at
-        `).run(integId, businessId, JSON.stringify(nextCfg), now, now, now);
-
-        result = syncSheetRowsToWorkspace(db, {
-          businessId,
-          rows,
-          sourceLabel: 'google_sheet_live_csv',
-          conflictPolicy: 'sheet_wins',
-          actorUserId: req.authUser?.id || null,
-          recordSyncLog: true,
-          emitNotificationOnChanges: true,
-        });
-      } else {
-        if (typeof autoScheduled === 'boolean') {
-          const existing = db
-            .prepare("SELECT id, config_json FROM integrations WHERE business_id = ? AND provider = 'google_sheets'")
-            .get(businessId) as { id: string; config_json: string } | undefined;
-          if (existing) {
-            const prevCfg = JSON.parse(existing.config_json || '{}');
-            db.prepare('UPDATE integrations SET config_json = ?, updated_at = ? WHERE id = ?').run(
-              JSON.stringify({ ...prevCfg, autoScheduled }),
-              new Date().toISOString(),
-              existing.id
-            );
-          }
+        if (existing) {
+          const prevCfg = JSON.parse(existing.config_json || '{}');
+          db.prepare('UPDATE integrations SET config_json = ?, updated_at = ? WHERE id = ?').run(
+            JSON.stringify({ ...prevCfg, autoScheduled }),
+            new Date().toISOString(),
+            existing.id
+          );
         }
-        result = syncAttachedSheetToWorkspace(db, businessId, ATTACHED_SHEET_PATH, {
-          emitNotificationOnChanges: true,
-        });
       }
 
-      res.json({ ok: true, mode: mode || 'attached', ...result });
+      const googleTokenHeader = req.headers['x-google-access-token'];
+      const googleAccessToken =
+        typeof googleTokenHeader === 'string' && googleTokenHeader.trim() ? googleTokenHeader.trim() : null;
+
+      const result = await syncWorkspaceFromConfiguredSheet(db, businessId, {
+        sheetUrl: typeof sheetUrl === 'string' && sheetUrl.trim() ? sheetUrl.trim() : undefined,
+        csvText: typeof csvText === 'string' && csvText.trim() ? csvText : undefined,
+        googleAccessToken,
+        actorUserId: req.authUser?.id || null,
+        emitNotificationOnChanges: true,
+        force: silent !== true,
+        preferAttachedOnly: source === 'attached' || mode === 'attached_only',
+      });
+
+      const runtime = getWorkspaceSheetSyncRuntimeState(businessId);
+      res.json({
+        ok: true,
+        mode: result.sourceMode || mode || 'google_sheet_live_csv',
+        ...result,
+        isSyncing: runtime.isSyncing,
+        lastSuccessAt: runtime.lastSuccessAt,
+        lastSyncDurationMs: runtime.lastSyncDurationMs,
+        lastError: runtime.lastError,
+      });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || 'Sheet sync failed' });
+      const runtime = getWorkspaceSheetSyncRuntimeState(businessId);
+      res.status(err?.statusCode === 400 ? 400 : 502).json({
+        error: err.message || 'Sheet sync failed',
+        isSyncing: runtime.isSyncing,
+        lastError: runtime.lastError || err.message,
+        consecutiveFailures: runtime.consecutiveFailures,
+      });
     }
   });
 
@@ -815,7 +794,7 @@ export function createCrmRoutes(
         LEFT JOIN users u ON u.id = l.assigned_to_user_id
         LEFT JOIN businesses b ON b.id = l.business_id
         WHERE ${whereClause}
-        ORDER BY ${orderCol} ${sortDir}
+        ORDER BY ${orderCol} ${sortDir}, l.updated_at DESC, l.lead_code DESC
         LIMIT ? OFFSET ?
       `)
       .all(...(params as any[]), pageSize, offset);

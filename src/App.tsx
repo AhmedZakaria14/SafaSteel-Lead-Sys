@@ -29,6 +29,7 @@ import {
   Crown,
   Search,
   MoreHorizontal,
+  AlertCircle,
 } from 'lucide-react';
 import {
   AnalyticsResponse,
@@ -159,21 +160,39 @@ function LeadFlowAppInner() {
   const [showCreateLeadModal, setShowCreateLeadModal] = useState(false);
   const [refreshCounter, setRefreshCounter] = useState(0);
   const [sheetStatus, setSheetStatus] = useState<{
+    status?: string;
     attachedSheetName?: string;
     lastSyncAt?: string | null;
+    lastAttemptAt?: string | null;
+    lastSyncDurationMs?: number | null;
+    lastError?: string | null;
+    isSyncing?: boolean;
+    consecutiveFailures?: number;
+    lastCreatedCount?: number;
+    lastUpdatedCount?: number;
+    lastNewLeads?: Array<{ id: string; sheetLeadId: string; fullName: string; phone: string; createdTime: string }>;
     spreadsheetId?: string | null;
     spreadsheetName?: string | null;
     publicCsvUrl?: string | null;
+    sheetUrl?: string | null;
     autoScheduled?: boolean;
     syncIntervalSec?: number;
     totalLeads?: number;
+    knownLeadsCount?: number;
   } | null>(null);
   const [syncingNow, setSyncingNow] = useState(false);
   const [sseConnected, setSseConnected] = useState(false);
+  const [browserOnline, setBrowserOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+  const [lastDetectedNewCount, setLastDetectedNewCount] = useState<number>(0);
 
   const notifMenuRef = useRef<HTMLDivElement>(null);
   const prevBusinessIdRef = useRef<string>('');
   const pendingDeepLinkRef = useRef<{ leadId: string | null; businessId: string | null } | null>(null);
+  const seenNotificationIdsRef = useRef<Set<string>>(new Set());
+  const syncInFlightRef = useRef<boolean>(false);
+  const consecutiveSyncFailuresRef = useRef<number>(0);
 
   const t = getT(lang);
   const isAr = lang === 'ar';
@@ -345,11 +364,15 @@ function LeadFlowAppInner() {
         apiRequest<{ notifications?: NotificationItem[]; unreadCount?: number }>(`/businesses/${bizId}/notifications`),
         apiRequest<any>(`/businesses/${bizId}/sheet-source/status`).catch(() => null),
       ]);
+      const loadedNotifs = Array.isArray(notifRes?.notifications) ? notifRes.notifications : [];
+      for (const n of loadedNotifs) {
+        if (n?.id) seenNotificationIdsRef.current.add(n.id);
+      }
       setStages(Array.isArray(stagesRes?.stages) ? stagesRes.stages : []);
       setCustomFields(Array.isArray(fieldsRes?.fields) ? fieldsRes.fields : []);
       setMembers(Array.isArray(membersRes?.members) ? membersRes.members : []);
       setAnalytics(analyticsRes || null);
-      setNotifications(Array.isArray(notifRes?.notifications) ? notifRes.notifications : []);
+      setNotifications(loadedNotifs);
       setUnreadCount(typeof notifRes?.unreadCount === 'number' ? notifRes.unreadCount : 0);
       if (sheetRes) setSheetStatus(sheetRes);
     } catch (err: any) {
@@ -475,6 +498,57 @@ function LeadFlowAppInner() {
     }
   }, [refreshCounter]);
 
+  const emitIncomingNotification = (notif: NotificationItem) => {
+    if (!notif || !notif.id) return;
+    if (
+      effectiveRoleRef.current === 'employee' &&
+      notif.user_id &&
+      currentUserIdRef.current &&
+      notif.user_id !== currentUserIdRef.current
+    ) {
+      return;
+    }
+    if (seenNotificationIdsRef.current.has(notif.id)) {
+      return;
+    }
+    seenNotificationIdsRef.current.add(notif.id);
+
+    setNotifications((prev) => {
+      if (prev.some((p) => p.id === notif.id)) return prev;
+      setUnreadCount((c) => c + 1);
+      return [notif, ...prev].slice(0, 50);
+    });
+
+    const liveIsAr = langRef.current === 'ar';
+    const title = liveIsAr ? notif.title_ar : notif.title_en;
+    const body = liveIsAr ? notif.message_ar : notif.message_en;
+    const linkPath = notif.link_path || '/leads';
+    const hasLeadLink = Boolean(extractLeadIdFromLinkPath(linkPath));
+
+    playNotificationSound(classifyNotificationSoundKind(notif.type), notif.id);
+
+    notify(body ? `${title} — ${body}` : title, notif.type === 'integration_failed' ? 'error' : 'info', {
+      actionLabel: hasLeadLink ? (liveIsAr ? 'فتح العميل' : 'Open Lead') : undefined,
+      onAction: hasLeadLink
+        ? () => navigateToLinkPathRef.current(linkPath, activeBusinessId, notif.id)
+        : undefined,
+    });
+
+    showBrowserPushNotification({
+      id: notif.id,
+      title,
+      body,
+      linkPath,
+      businessId: activeBusinessId,
+      onNavigate: (lp, lid, bid, nid) => {
+        navigateToLinkPathRef.current(lp, bid, nid, lid);
+      },
+    });
+  };
+
+  const emitIncomingNotificationRef = useRef(emitIncomingNotification);
+  emitIncomingNotificationRef.current = emitIncomingNotification;
+
   // Real-time Server-Sent Events (SSE) subscription for live notifications, leads & sheet updates
   useEffect(() => {
     if (!activeBusinessId || !activeBusiness || !authUser) return;
@@ -497,47 +571,7 @@ function LeadFlowAppInner() {
             const payload = JSON.parse((evt as MessageEvent).data || '{}');
             const notif: NotificationItem | undefined = payload.notification;
             if (!notif) return;
-
-            if (
-              effectiveRoleRef.current === 'employee' &&
-              notif.user_id &&
-              currentUserIdRef.current &&
-              notif.user_id !== currentUserIdRef.current
-            ) {
-              return;
-            }
-
-            setNotifications((prev) => {
-              if (prev.some((p) => p.id === notif.id)) return prev;
-              setUnreadCount((c) => c + 1);
-              return [notif, ...prev].slice(0, 50);
-            });
-
-            const liveIsAr = langRef.current === 'ar';
-            const title = liveIsAr ? notif.title_ar : notif.title_en;
-            const body = liveIsAr ? notif.message_ar : notif.message_en;
-            const linkPath = notif.link_path || '/leads';
-            const hasLeadLink = Boolean(extractLeadIdFromLinkPath(linkPath));
-
-            playNotificationSound(classifyNotificationSoundKind(notif.type), notif.id);
-
-            notify(title, notif.type === 'integration_failed' ? 'error' : 'info', {
-              actionLabel: hasLeadLink ? (liveIsAr ? 'فتح العميل' : 'Open Lead') : undefined,
-              onAction: hasLeadLink
-                ? () => navigateToLinkPathRef.current(linkPath, activeBusinessId, notif.id)
-                : undefined,
-            });
-
-            showBrowserPushNotification({
-              id: notif.id,
-              title,
-              body,
-              linkPath,
-              businessId: activeBusinessId,
-              onNavigate: (lp, lid, bid, nid) => {
-                navigateToLinkPathRef.current(lp, bid, nid, lid);
-              },
-            });
+            emitIncomingNotificationRef.current(notif);
           } catch {
             // ignore malformed notification payload
           }
@@ -563,6 +597,157 @@ function LeadFlowAppInner() {
       es?.close();
     };
   }, [activeBusinessId, authUser?.id]);
+
+  // Execute Google Sheet synchronization (manual or background 15s polling) with deduplication & backoff
+  const triggerSheetSync = async (options?: { manual?: boolean; signal?: AbortSignal }) => {
+    const bizId = activeBusinessId;
+    if (!bizId || !authUser) return;
+    if (syncInFlightRef.current) return;
+    if (!options?.manual && typeof navigator !== 'undefined' && !navigator.onLine) return;
+
+    syncInFlightRef.current = true;
+    setSyncingNow(true);
+    setSheetStatus((prev) => (prev ? { ...prev, isSyncing: true, lastError: options?.manual ? null : prev.lastError } : prev));
+
+    try {
+      const res = await apiRequest<{
+        createdCount: number;
+        updatedCount: number;
+        skippedCount: number;
+        totalLeadsInBusiness: number;
+        syncDurationMs?: number;
+        lastSuccessAt?: string;
+        createdNotifications?: NotificationItem[];
+        newLeads?: Array<{ id: string; sheetLeadId: string; fullName: string; phone: string; createdTime: string }>;
+      }>(`/businesses/${bizId}/sheet-source/sync`, {
+        method: 'POST',
+        body: JSON.stringify({ silent: !options?.manual }),
+        signal: options?.signal,
+      });
+
+      consecutiveSyncFailuresRef.current = 0;
+      const nowIso = res.lastSuccessAt || new Date().toISOString();
+
+      setSheetStatus((prev) => ({
+        ...(prev || {}),
+        status: 'connected',
+        isSyncing: false,
+        lastSyncAt: nowIso,
+        lastSyncDurationMs: res.syncDurationMs ?? prev?.lastSyncDurationMs ?? null,
+        lastError: null,
+        consecutiveFailures: 0,
+        totalLeads: res.totalLeadsInBusiness ?? prev?.totalLeads,
+        lastCreatedCount: res.createdCount,
+        lastUpdatedCount: res.updatedCount,
+        lastNewLeads: res.newLeads || prev?.lastNewLeads || [],
+      }));
+
+      if (Array.isArray(res.createdNotifications) && res.createdNotifications.length > 0) {
+        for (const notif of res.createdNotifications) {
+          emitIncomingNotificationRef.current(notif);
+        }
+      }
+
+      if (res.createdCount > 0) {
+        setLastDetectedNewCount(res.createdCount);
+      }
+
+      if (options?.manual) {
+        notify(
+          langRef.current === 'ar'
+            ? `تمت مزامنة Google Sheets (${res.totalLeadsInBusiness} عميل) — +${res.createdCount} ليد جديدة (${res.syncDurationMs || 0}ms)`
+            : `Google Sheets synced (${res.totalLeadsInBusiness} leads) — +${res.createdCount} new (${res.syncDurationMs || 0}ms)`,
+          'success'
+        );
+      }
+
+      if (options?.manual || res.createdCount > 0 || res.updatedCount > 0) {
+        setRefreshCounter((c) => c + 1);
+      }
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return;
+      consecutiveSyncFailuresRef.current += 1;
+      const errMsg = err?.message || 'Sheet sync failed';
+      setSheetStatus((prev) => ({
+        ...(prev || {}),
+        status: 'error',
+        isSyncing: false,
+        lastError: errMsg,
+        consecutiveFailures: consecutiveSyncFailuresRef.current,
+      }));
+      if (options?.manual) {
+        notify(errMsg, 'error');
+      }
+    } finally {
+      syncInFlightRef.current = false;
+      setSyncingNow(false);
+    }
+  };
+
+  const triggerSheetSyncRef = useRef(triggerSheetSync);
+  triggerSheetSyncRef.current = triggerSheetSync;
+
+  // Adaptive 15-second automatic polling + immediate sync on open, tab visibility, and network online recovery
+  useEffect(() => {
+    if (!activeBusinessId || !authUser) return;
+    let cancelled = false;
+    let timerId: number | null = null;
+    const abortController = new AbortController();
+
+    const baseIntervalMs = Math.max(10_000, Math.min(120_000, (sheetStatus?.syncIntervalSec || 15) * 1000));
+
+    const scheduleNextTick = () => {
+      if (cancelled) return;
+      if (timerId !== null) window.clearTimeout(timerId);
+      const failures = consecutiveSyncFailuresRef.current;
+      const backoffMultiplier = failures > 0 ? Math.min(8, Math.pow(2, failures)) : 1;
+      const delayMs = Math.min(120_000, baseIntervalMs * backoffMultiplier);
+      timerId = window.setTimeout(async () => {
+        if (cancelled) return;
+        if (document.visibilityState === 'visible' && navigator.onLine) {
+          await triggerSheetSyncRef.current({ manual: false, signal: abortController.signal });
+        }
+        scheduleNextTick();
+      }, delayMs);
+    };
+
+    // Immediate check on workspace open
+    void triggerSheetSyncRef.current({ manual: false, signal: abortController.signal });
+    scheduleNextTick();
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine && !cancelled) {
+        void triggerSheetSyncRef.current({ manual: false, signal: abortController.signal });
+        scheduleNextTick();
+      }
+    };
+
+    const onOnline = () => {
+      setBrowserOnline(true);
+      consecutiveSyncFailuresRef.current = 0;
+      if (!cancelled) {
+        void triggerSheetSyncRef.current({ manual: false, signal: abortController.signal });
+        scheduleNextTick();
+      }
+    };
+
+    const onOffline = () => {
+      setBrowserOnline(false);
+    };
+
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      if (timerId !== null) window.clearTimeout(timerId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+    };
+  }, [activeBusinessId, authUser?.id, sheetStatus?.syncIntervalSec]);
 
   const handleLoginSuccess = (data: {
     token: string;
@@ -630,25 +815,7 @@ function LeadFlowAppInner() {
   };
 
   const handleManualSheetSync = async () => {
-    if (!activeBusinessId || syncingNow) return;
-    setSyncingNow(true);
-    try {
-      const res = await apiRequest<{ createdCount: number; updatedCount: number; totalLeadsInBusiness: number }>(
-        `/businesses/${activeBusinessId}/sheet-source/sync`,
-        { method: 'POST', body: JSON.stringify({}) }
-      );
-      notify(
-        isAr
-          ? `مزامنة الشيت مكتملة (${res.totalLeadsInBusiness} عميل) — +${res.createdCount} جديد`
-          : `Sheet synced (${res.totalLeadsInBusiness} leads) — +${res.createdCount} new`,
-        'success'
-      );
-      setRefreshCounter((c) => c + 1);
-    } catch (err: any) {
-      notify(err.message, 'error');
-    } finally {
-      setSyncingNow(false);
-    }
+    await triggerSheetSync({ manual: true });
   };
 
   const handleMarkNotificationsRead = async () => {
@@ -1318,44 +1485,113 @@ function LeadFlowAppInner() {
           </div>
         )}
 
-        {/* Live Sheet Sync Status Bar (Compact on Mobile, non-sticky so viewport stays open) */}
+        {/* Google Sheets Sync Status Indicator Bar */}
         {activeBusiness && (
-          <div className="bg-emerald-50/70 dark:bg-emerald-950/30 border-b border-emerald-200/80 dark:border-emerald-900/60 px-3 sm:px-6 py-1.5 sm:py-2 flex items-center justify-between gap-2 text-[11px] sm:text-xs text-emerald-950 dark:text-emerald-200">
-            <div className="flex items-center gap-2 min-w-0 flex-1">
-              <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span className="font-semibold truncate">
+          <div
+            className={`border-b px-3 sm:px-6 py-1.5 sm:py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs transition-colors ${
+              !browserOnline || sheetStatus?.lastError
+                ? 'bg-red-50/80 dark:bg-red-950/30 border-red-200 dark:border-red-900/60 text-red-950 dark:text-red-200'
+                : 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/80 dark:border-emerald-900/60 text-emerald-950 dark:text-emerald-200'
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+              <FileSpreadsheet
+                className={`h-3.5 w-3.5 shrink-0 ${
+                  !browserOnline || sheetStatus?.lastError
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
+                }`}
+              />
+              <span className="font-semibold truncate max-w-[160px] sm:max-w-[260px]">
                 {sheetStatus?.spreadsheetName || sheetStatus?.attachedSheetName || activeBusiness.name}
               </span>
-              <span className="text-emerald-700/80 dark:text-emerald-300/80 hidden sm:inline">·</span>
-              <span className="tabular-nums hidden sm:inline">
-                {sseConnected
-                  ? isAr ? 'مزامنة لحظية مفعلة' : 'Live Sync Active'
-                  : isAr ? 'جاري الاتصال بالمزامنة...' : 'Connecting live sync...'}
+
+              {/* Connection & Sync State Badge */}
+              <span
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                  !browserOnline
+                    ? 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200'
+                    : sheetStatus?.lastError
+                    ? 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200'
+                    : syncingNow || sheetStatus?.isSyncing
+                    ? 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-200'
+                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    !browserOnline || sheetStatus?.lastError
+                      ? 'bg-red-600'
+                      : syncingNow || sheetStatus?.isSyncing
+                      ? 'bg-amber-500 animate-ping'
+                      : 'bg-emerald-600'
+                  }`}
+                />
+                <span>
+                  {!browserOnline
+                    ? isAr
+                      ? 'غير متصل'
+                      : 'Disconnected'
+                    : sheetStatus?.lastError
+                    ? isAr
+                      ? 'خطأ في المزامنة'
+                      : 'Sync Error'
+                    : syncingNow || sheetStatus?.isSyncing
+                    ? isAr
+                      ? 'جاري المزامنة...'
+                      : 'Syncing...'
+                    : isAr
+                    ? `متصل · فحص كل ${sheetStatus?.syncIntervalSec || 15}ث${sseConnected ? ' + بث فوري' : ''}`
+                    : `Connected · ${sheetStatus?.syncIntervalSec || 15}s Poll${sseConnected ? ' + Live' : ''}`}
+                </span>
               </span>
-              {sheetStatus?.lastSyncAt && (
-                <>
-                  <span className="text-emerald-700/80 dark:text-emerald-300/80 hidden md:inline">·</span>
-                  <span className="text-emerald-800/80 dark:text-emerald-300/80 tabular-nums hidden md:inline">
-                    {isAr ? 'آخر تحديث:' : 'Last sync:'}{' '}
-                    {new Date(sheetStatus.lastSyncAt).toLocaleTimeString(isAr ? 'ar-EG' : 'en-US')}
-                  </span>
-                </>
+
+              {/* New Leads Detected Badge */}
+              {(lastDetectedNewCount > 0 || (sheetStatus?.lastCreatedCount || 0) > 0) && (
+                <span className="inline-flex items-center gap-1 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white tabular-nums">
+                  +{lastDetectedNewCount || sheetStatus?.lastCreatedCount}{' '}
+                  {isAr ? 'ليد جديدة' : 'New Leads'}
+                </span>
+              )}
+
+              {/* Last Successful Sync & Duration */}
+              {sheetStatus?.lastSyncAt && !sheetStatus?.lastError && (
+                <span className="text-emerald-800/80 dark:text-emerald-300/80 tabular-nums hidden md:inline">
+                  · {isAr ? 'آخر مزامنة ناجحة:' : 'Last Sync:'}{' '}
+                  {new Date(sheetStatus.lastSyncAt).toLocaleTimeString(isAr ? 'ar-EG' : 'en-US')}
+                  {typeof sheetStatus.lastSyncDurationMs === 'number'
+                    ? ` (${sheetStatus.lastSyncDurationMs}ms)`
+                    : ''}
+                </span>
+              )}
+
+              {/* Error Message Display */}
+              {sheetStatus?.lastError && (
+                <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-300 font-medium truncate max-w-[260px] sm:max-w-[420px]">
+                  <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{sheetStatus.lastError}</span>
+                </span>
               )}
             </div>
+
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               <button
                 type="button"
                 onClick={handleManualSheetSync}
                 disabled={syncingNow}
-                className="inline-flex items-center gap-1 rounded-md border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 px-2.5 py-1 min-h-[30px] text-[11px] sm:text-xs font-semibold text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40 disabled:opacity-50"
+                className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 min-h-[30px] text-[11px] sm:text-xs font-semibold disabled:opacity-50 ${
+                  sheetStatus?.lastError
+                    ? 'border-red-300 dark:border-red-800 bg-red-600 text-white hover:bg-red-700'
+                    : 'border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40'
+                }`}
               >
                 <RefreshCw className={`h-3 w-3 ${syncingNow ? 'animate-spin' : ''}`} />
-                <span>{t.syncNow}</span>
+                <span>{sheetStatus?.lastError ? (isAr ? 'إعادة المحاولة' : 'Retry Sync') : t.syncNow}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('integrations')}
-                className="hidden sm:inline-flex items-center gap-1 font-semibold underline hover:text-emerald-700 dark:hover:text-emerald-300"
+                className="hidden sm:inline-flex items-center gap-1 font-semibold underline hover: opacity-85"
               >
                 <span>{isAr ? 'إعدادات الشيت' : 'Sheet Source'}</span>
               </button>
@@ -1363,7 +1599,7 @@ function LeadFlowAppInner() {
                 <button
                   type="button"
                   onClick={handleResetDemo}
-                  className="hidden sm:inline-flex items-center gap-1 text-emerald-800/80 dark:text-emerald-300/80 hover:underline"
+                  className="hidden sm:inline-flex items-center gap-1 opacity-80 hover:underline"
                 >
                   <RotateCcw className="h-3 w-3" />
                   <span>{t.resetDemo}</span>

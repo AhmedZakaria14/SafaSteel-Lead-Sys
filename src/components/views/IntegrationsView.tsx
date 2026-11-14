@@ -46,11 +46,20 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
   // Live Sheet URL / CSV Source State
   const [sheetUrlInput, setSheetUrlInput] = useState('');
   const [liveSheetStatus, setLiveSheetStatus] = useState<{
+    status?: string;
     attachedSheetName?: string;
+    spreadsheetName?: string | null;
+    spreadsheetId?: string | null;
     lastSyncAt?: string | null;
+    lastSyncDurationMs?: number | null;
+    lastError?: string | null;
     publicCsvUrl?: string | null;
+    sheetUrl?: string | null;
     autoScheduled?: boolean;
+    syncIntervalSec?: number;
     totalLeads?: number;
+    knownLeadsCount?: number;
+    lastCreatedCount?: number;
   } | null>(null);
   const [syncingSource, setSyncingSource] = useState(false);
 
@@ -67,8 +76,9 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
       setLogs(res.logs);
       if (sheetStatusRes) {
         setLiveSheetStatus(sheetStatusRes);
-        if (sheetStatusRes.publicCsvUrl && !sheetUrlInput) {
-          setSheetUrlInput(sheetStatusRes.publicCsvUrl);
+        const preferredUrl = sheetStatusRes.sheetUrl || sheetStatusRes.publicCsvUrl;
+        if (preferredUrl && !sheetUrlInput) {
+          setSheetUrlInput(preferredUrl);
         }
       }
 
@@ -397,14 +407,27 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
           {/* Live Attached Sheet + Direct Google Sheet CSV URL Sync */}
           <div className="rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/50 dark:bg-emerald-950/20 p-3.5 sm:p-4 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div>
-                <div className="text-xs font-semibold text-emerald-950 dark:text-emerald-200">
-                  {isAr ? 'المزامنة اللحظية المستمرة للشيت' : 'Real-Time Continuous Sheet Sync'}
+              <div className="space-y-0.5">
+                <div className="text-xs font-semibold text-emerald-950 dark:text-emerald-200 flex items-center gap-2">
+                  <span>{isAr ? 'المزامنة اللحظية المستمرة للشيت' : 'Real-Time Continuous Sheet Sync'}</span>
+                  <span className="inline-flex items-center rounded bg-emerald-100 dark:bg-emerald-900/60 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:text-emerald-200">
+                    {isAr ? `فحص تلقائي كل ${liveSheetStatus?.syncIntervalSec || 15} ثانية` : `Auto-Poll Every ${liveSheetStatus?.syncIntervalSec || 15}s`}
+                  </span>
                 </div>
                 <div className="text-[11px] text-emerald-800/80 dark:text-emerald-300/80 tabular-nums">
-                  {liveSheetStatus?.attachedSheetName || 'الصفا ستيل غرابيل وحوامل كابلات'} ·{' '}
-                  {liveSheetStatus?.totalLeads ?? 0} {isAr ? 'عميل متزامن' : 'synced leads'}
+                  {liveSheetStatus?.spreadsheetName || liveSheetStatus?.attachedSheetName || 'الصفا ستيل غرابيل وحوامل كابلات'} ·{' '}
+                  {liveSheetStatus?.totalLeads ?? 0} {isAr ? 'عميل متزامن' : 'synced leads'} ·{' '}
+                  {liveSheetStatus?.knownLeadsCount ?? liveSheetStatus?.totalLeads ?? 0}{' '}
+                  {isAr ? 'معرّف مسجل (Known IDs)' : 'Known IDs'}
+                  {typeof liveSheetStatus?.lastSyncDurationMs === 'number' && (
+                    <span> · {liveSheetStatus.lastSyncDurationMs}ms</span>
+                  )}
                 </div>
+                {liveSheetStatus?.lastError && (
+                  <div className="text-[11px] text-red-600 dark:text-red-400 font-medium">
+                    {isAr ? 'خطأ المزامنة الأخير:' : 'Last Sync Error:'} {liveSheetStatus.lastError}
+                  </div>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <button

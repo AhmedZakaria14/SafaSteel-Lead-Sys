@@ -10,6 +10,9 @@ import {
 import {
   ALSAFA_WORKSPACE_ID,
   ATTACHED_SHEET_PATH,
+  DEFAULT_ALSAFA_CSV_URL,
+  DEFAULT_ALSAFA_SHEET_URL,
+  DEFAULT_ALSAFA_SPREADSHEET_ID,
   syncAttachedSheetToWorkspace,
 } from './services/sheetSyncService.ts';
 
@@ -152,6 +155,65 @@ function ensureTwoSystemAccounts(db: SqlDb) {
   void syncSystemAccountsToFirestore(db);
 }
 
+function ensureAlSafaGoogleSheetsIntegration(db: SqlDb) {
+  const now = new Date().toISOString();
+  const existing = db
+    .prepare("SELECT id, config_json FROM integrations WHERE business_id = ? AND provider = 'google_sheets'")
+    .get(ALSAFA_WORKSPACE_ID) as { id: string; config_json: string } | undefined;
+
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO integrations (id, business_id, provider, status, display_name, config_json, last_sync_at, last_error, created_at, updated_at)
+      VALUES (?, ?, 'google_sheets', 'connected', 'الصفا ستيل غرابيل وحوامل كابلات (Live Sheet Sync)', ?, ?, NULL, ?, ?)
+    `).run(
+      crypto.randomUUID(),
+      ALSAFA_WORKSPACE_ID,
+      JSON.stringify({
+        mode: 'A',
+        conflictPolicy: 'sheet_wins',
+        autoScheduled: true,
+        syncIntervalSec: 15,
+        attachedSheetName: 'الصفا ستيل غرابيل وحوامل كابلات',
+        spreadsheetName: 'الصفا ستيل غرابيل وحوامل كابلات',
+        spreadsheetId: DEFAULT_ALSAFA_SPREADSHEET_ID,
+        sheetUrl: DEFAULT_ALSAFA_SHEET_URL,
+        publicCsvUrl: DEFAULT_ALSAFA_CSV_URL,
+        syncNotes: true,
+      }),
+      now,
+      now,
+      now
+    );
+    return;
+  }
+
+  try {
+    const prevCfg = JSON.parse(existing.config_json || '{}');
+    if (!prevCfg.publicCsvUrl || !prevCfg.spreadsheetId || !prevCfg.sheetUrl) {
+      const nextCfg = {
+        ...prevCfg,
+        mode: prevCfg.mode || 'A',
+        conflictPolicy: prevCfg.conflictPolicy || 'sheet_wins',
+        autoScheduled: prevCfg.autoScheduled !== false,
+        syncIntervalSec: Number(prevCfg.syncIntervalSec || 15),
+        attachedSheetName: prevCfg.attachedSheetName || 'الصفا ستيل غرابيل وحوامل كابلات',
+        spreadsheetName: prevCfg.spreadsheetName || 'الصفا ستيل غرابيل وحوامل كابلات',
+        spreadsheetId: prevCfg.spreadsheetId || DEFAULT_ALSAFA_SPREADSHEET_ID,
+        sheetUrl: prevCfg.sheetUrl || DEFAULT_ALSAFA_SHEET_URL,
+        publicCsvUrl: prevCfg.publicCsvUrl || DEFAULT_ALSAFA_CSV_URL,
+      };
+      db.prepare('UPDATE integrations SET status = ?, config_json = ?, updated_at = ? WHERE id = ?').run(
+        'connected',
+        JSON.stringify(nextCfg),
+        now,
+        existing.id
+      );
+    }
+  } catch {
+    // ignore malformed json
+  }
+}
+
 export function ensureDemoData(db: SqlDb) {
   // Purge legacy fake businesses if present in an existing persisted DB
   for (const legacyId of LEGACY_FAKE_BIZ_IDS) {
@@ -166,6 +228,7 @@ export function ensureDemoData(db: SqlDb) {
     seedAlSafaWorkspace(db);
   } else {
     ensureTwoSystemAccounts(db);
+    ensureAlSafaGoogleSheetsIntegration(db);
     // Ensure any newly appended rows in the attached sheet are synced on startup
     if (fs.existsSync(ATTACHED_SHEET_PATH)) {
       syncAttachedSheetToWorkspace(db, ALSAFA_WORKSPACE_ID, ATTACHED_SHEET_PATH, {
@@ -239,8 +302,12 @@ function seedAlSafaWorkspace(db: SqlDb) {
       mode: 'A',
       conflictPolicy: 'sheet_wins',
       autoScheduled: true,
+      syncIntervalSec: 15,
       attachedSheetName: 'الصفا ستيل غرابيل وحوامل كابلات',
       spreadsheetName: 'الصفا ستيل غرابيل وحوامل كابلات',
+      spreadsheetId: DEFAULT_ALSAFA_SPREADSHEET_ID,
+      sheetUrl: DEFAULT_ALSAFA_SHEET_URL,
+      publicCsvUrl: DEFAULT_ALSAFA_CSV_URL,
       syncNotes: true,
     }),
     now,

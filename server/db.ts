@@ -520,6 +520,32 @@ function initSchema(db: SqlDb) {
   }
 
   normalizeDeterministicIds(db);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS known_sheet_leads (
+      business_id TEXT NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      sheet_lead_id TEXT NOT NULL,
+      lead_id TEXT NOT NULL,
+      row_hash TEXT,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      notified_at TEXT,
+      PRIMARY KEY (business_id, sheet_lead_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_known_sheet_leads_lead_id ON known_sheet_leads(business_id, lead_id);
+  `);
+
+  // Backfill known_sheet_leads from any existing synced leads so Known Lead IDs state is always persisted
+  try {
+    db.exec(`
+      INSERT OR IGNORE INTO known_sheet_leads (business_id, sheet_lead_id, lead_id, row_hash, first_seen_at, last_seen_at, notified_at)
+      SELECT business_id, external_row_id, id, NULL, created_at, updated_at, created_at
+      FROM leads
+      WHERE external_row_id IS NOT NULL AND external_row_id != '';
+    `);
+  } catch {
+    // ignore backfill issues on empty DB
+  }
 }
 
 export function deterministicStageId(businessId: string, stageKey: string): string {
@@ -673,7 +699,12 @@ export function normalizePhoneE164(phone?: string | null, defaultCountryCode = '
 }
 
 export function generateLeadCode(businessId: string, db: SqlDb): string {
-  const row = db.prepare('SELECT COUNT(*) as cnt FROM leads WHERE business_id = ?').get(businessId) as { cnt: number };
-  const num = (row?.cnt || 0) + 1001;
-  return `LD-${num}`;
+  const maxCodeRow = db
+    .prepare(
+      "SELECT MAX(CAST(REPLACE(lead_code, 'LD-', '') AS INTEGER)) as maxNum FROM leads WHERE business_id = ? AND lead_code LIKE 'LD-%'"
+    )
+    .get(businessId) as { maxNum: number | null } | undefined;
+  const countRow = db.prepare('SELECT COUNT(*) as cnt FROM leads WHERE business_id = ?').get(businessId) as { cnt: number };
+  const nextNum = Math.max(1001, (maxCodeRow?.maxNum || 1000) + 1, (countRow?.cnt || 0) + 1001);
+  return `LD-${nextNum}`;
 }

@@ -222,10 +222,15 @@ export function createGoogleRoutes(db: SqlDb, authMiddleware: any) {
       const startedAt = new Date().toISOString();
 
       try {
-        const range = `'${sheetTitle.replace(/'/g, "''")}'!A1:Z5000`;
+        const range = `'${sheetTitle.replace(/'/g, "''")}'`;
         const sheetRes = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
+          `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?majorDimension=ROWS`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Cache-Control': 'no-cache',
+            },
+          }
         );
         const sheetData = (await sheetRes.json()) as any;
         if (!sheetRes.ok || sheetData.error) {

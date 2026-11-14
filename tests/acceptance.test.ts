@@ -691,6 +691,243 @@ describe('LeadFlow CRM Acceptance Tests', () => {
     );
     assert.equal(hintedStatusRes.status, 200);
   });
+
+  it('23. Detects new Google Sheet leads at top, middle, bottom, and after empty rows (including MANUAL_TEST_20261114_0740_CHATGPT), sorts by created_time with timezones, and prevents duplicate notifications', async () => {
+    const okLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'SafaSteels2026' }),
+    });
+    assert.equal(okLogin.status, 200);
+    const { token } = await okLogin.json();
+
+    // Build a multi-row CSV with:
+    // - A lead at the top of the sheet
+    // - An existing historical lead in the middle
+    // - Multiple empty rows in between
+    // - Target test lead MANUAL_TEST_20261114_0740_CHATGPT at row 414 after empty rows
+    // - Batch of 2 additional leads at the bottom with different timezone offsets
+    const headers = [
+      'id',
+      'created_time',
+      'ad_id',
+      'ad_name',
+      'adset_id',
+      'adset_name',
+      'campaign_id',
+      'campaign_name',
+      'form_id',
+      'form_name',
+      'is_organic',
+      'platform',
+      'اختار المنتج المناسب لطلبك',
+      'الكمية المطلوبة والمقاسات ؟',
+      'full_name',
+      'phone_number',
+      'تأكيد رقم الواتساب ؟',
+      'company_name',
+      'job_title',
+      'lead_status',
+    ].join('\t');
+
+    const topRow = [
+      'TEST_TOP_ROW_20261114',
+      '2026-11-14T09:15:00+02:00',
+      'ag:1',
+      'Ad Top',
+      'as:1',
+      'Adset Top',
+      'c:1',
+      'Campaign Top',
+      'f:1',
+      'Form Top',
+      'false',
+      'fb',
+      'حوامل الكابلات cable trays',
+      '100 متر',
+      'عميل اختبار أعلى الشيت',
+      'p:+201099990001',
+      '+201099990001',
+      'شركة القمة',
+      'مهندس مشتريات',
+      'CREATED',
+    ].join('\t');
+
+    const middleRow = [
+      'TEST_MIDDLE_ROW_20261114',
+      '2026-11-14T08:30:00+03:00', // 05:30 UTC (earlier than 07:40+02:00 which is 05:40 UTC!)
+      'ag:2',
+      'Ad Mid',
+      'as:2',
+      'Adset Mid',
+      'c:2',
+      'Campaign Mid',
+      'f:2',
+      'Form Mid',
+      'false',
+      'ig',
+      'تخريم الصاج ( الغرابيل )',
+      '50 فرخ',
+      'عميل اختبار وسط الشيت',
+      'p:+201099990002',
+      '+201099990002',
+      'مصنع النيل',
+      'مدير إنتاج',
+      'CREATED',
+    ].join('\t');
+
+    const emptyRow = '\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t';
+
+    const manualTestRow414 = [
+      'MANUAL_TEST_20261114_0740_CHATGPT',
+      '2026-11-14T07:40:00+02:00', // 05:40 UTC
+      'ag:test_01',
+      'اختبار الإشعارات التلقائية',
+      'as:test_01',
+      'مجموعة اختبار المزامنة',
+      'c:test_01',
+      'حملة اختبار CRM',
+      'f:test_01',
+      'نموذج اختبار الإشعارات',
+      'false',
+      'fb',
+      'حوامل الكابلات cable trays',
+      'اختبار إشعار فوري - صف رقم 414',
+      'اختبار يدوي ChatGPT - لا تتواصل',
+      'p:+200000000000',
+      '+200000000000',
+      'شركة اختبار النظام',
+      'فريق الاختبار التقني',
+      'CREATED',
+    ].join('\t');
+
+    const bottomRow = [
+      'TEST_BOTTOM_ROW_20261114',
+      '2026-11-14T10:00:00Z', // 10:00 UTC (newest of all!)
+      'ag:3',
+      'Ad Bottom',
+      'as:3',
+      'Adset Bottom',
+      'c:3',
+      'Campaign Bottom',
+      'f:3',
+      'Form Bottom',
+      'false',
+      'fb',
+      'حوامل الكابلات cable trays',
+      '250 متر',
+      'عميل اختبار أسفل الشيت بعد فراغات',
+      'p:+201099990003',
+      '+201099990003',
+      'شركة الدلتا',
+      'مدير مشاريع',
+      'CREATED',
+    ].join('\t');
+
+    const csvPayload1 = [
+      headers,
+      topRow,
+      emptyRow,
+      emptyRow,
+      middleRow,
+      emptyRow,
+      emptyRow,
+      emptyRow,
+      emptyRow,
+      emptyRow,
+      manualTestRow414,
+      emptyRow,
+      bottomRow,
+    ].join('\n');
+
+    // Sync #1: All 4 new leads must be detected despite empty rows and regardless of position
+    const syncRes1 = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/sheet-source/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ csvText: csvPayload1 }),
+    });
+    assert.equal(syncRes1.status, 200);
+    const syncJson1 = await syncRes1.json();
+    assert.equal(syncJson1.createdCount, 4, 'Expected all 4 new leads across top, middle, and after empty rows to be created');
+    assert.equal(syncJson1.createdNotifications.length, 4, 'Expected 4 notifications for the 4 new leads');
+    assert.equal(typeof syncJson1.syncDurationMs, 'number');
+
+    // Verify notification for MANUAL_TEST_20261114_0740_CHATGPT contains name, phone, and registration time
+    const manualNotif = syncJson1.createdNotifications.find((n: any) =>
+      String(n.title_ar || '').includes('اختبار يدوي ChatGPT - لا تتواصل')
+    );
+    assert.ok(manualNotif, 'Expected notification for MANUAL_TEST_20261114_0740_CHATGPT');
+    assert.ok(String(manualNotif.message_ar).includes('+200000000000'), 'Notification must include phone number');
+    assert.ok(String(manualNotif.message_ar).includes('وقت التسجيل'), 'Notification must include registration time');
+    assert.ok(String(manualNotif.link_path).startsWith('/leads/'), 'Notification must link directly to lead details');
+
+    // Sync #2 (Idempotency): Re-syncing identical sheet produces 0 new leads and 0 duplicate notifications
+    const syncRes2 = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/sheet-source/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ csvText: csvPayload1 }),
+    });
+    assert.equal(syncRes2.status, 200);
+    const syncJson2 = await syncRes2.json();
+    assert.equal(syncJson2.createdCount, 0, 'Repeated sync must not duplicate leads');
+    assert.equal(syncJson2.createdNotifications.length, 0, 'Repeated sync must not emit duplicate notifications');
+
+    // Sync #3 (Editing an old lead): Modifying company_name on MANUAL_TEST_20261114_0740_CHATGPT updates it without emitting a new-lead notification
+    const updatedManualRow = manualTestRow414.replace('شركة اختبار النظام', 'شركة اختبار النظام - محدث');
+    const csvPayload3 = [headers, topRow, emptyRow, middleRow, emptyRow, updatedManualRow, bottomRow].join('\n');
+    const syncRes3 = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/sheet-source/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ csvText: csvPayload3 }),
+    });
+    assert.equal(syncRes3.status, 200);
+    const syncJson3 = await syncRes3.json();
+    assert.equal(syncJson3.createdCount, 0, 'Editing an existing lead must not create a new lead');
+    assert.equal(syncJson3.updatedCount, 1, 'Edited lead must be updated');
+    assert.equal(syncJson3.createdNotifications.length, 0, 'Editing an existing lead must not send a new-lead notification');
+
+    // Verify chronological ordering by created_time (regardless of row position in sheet):
+    // Expected order by UTC time DESC:
+    // 1. TEST_BOTTOM_ROW_20261114 (2026-11-14T10:00:00Z -> 10:00 UTC)
+    // 2. TEST_TOP_ROW_20261114 (2026-11-14T09:15:00+02:00 -> 07:15 UTC)
+    // 3. MANUAL_TEST_20261114_0740_CHATGPT (2026-11-14T07:40:00+02:00 -> 05:40 UTC)
+    // 4. TEST_MIDDLE_ROW_20261114 (2026-11-14T08:30:00+03:00 -> 05:30 UTC)
+    const leadsRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads?sortBy=created_at&sortDir=desc&pageSize=25`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert.equal(leadsRes.status, 200);
+    const targetIds = new Set([
+      'TEST_BOTTOM_ROW_20261114',
+      'TEST_TOP_ROW_20261114',
+      'MANUAL_TEST_20261114_0740_CHATGPT',
+      'TEST_MIDDLE_ROW_20261114',
+    ]);
+    const matchedLeads = ((await leadsRes.json()).leads as any[]).filter((l) =>
+      targetIds.has(l.external_row_id)
+    );
+    assert.deepEqual(
+      matchedLeads.map((l) => l.external_row_id),
+      [
+        'TEST_BOTTOM_ROW_20261114',
+        'TEST_TOP_ROW_20261114',
+        'MANUAL_TEST_20261114_0740_CHATGPT',
+        'TEST_MIDDLE_ROW_20261114',
+      ],
+      'Leads must be sorted chronologically by parsed UTC created_time regardless of sheet row order'
+    );
+
+    // Verify /sheet-source/status telemetry
+    const statusRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/sheet-source/status`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(statusRes.status, 200);
+    const statusJson = await statusRes.json();
+    assert.equal(statusJson.status, 'connected');
+    assert.equal(statusJson.syncIntervalSec, 15);
+    assert.ok(statusJson.knownLeadsCount >= 409);
+  });
 });
+
 
 
