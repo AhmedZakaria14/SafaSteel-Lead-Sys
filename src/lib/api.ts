@@ -64,5 +64,20 @@ export async function apiRequest<T = any>(
     return (await res.json()) as T;
   }
 
-  throw new Error('API endpoint returned non-JSON response');
+  const rawText = await res.text().catch(() => '');
+  const trimmed = rawText.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      return JSON.parse(trimmed) as T;
+    } catch {
+      // fall through to descriptive non-JSON error
+    }
+  }
+
+  const looksLikeHtml = contentType.includes('text/html') || trimmed.startsWith('<');
+  throw new Error(
+    looksLikeHtml
+      ? `API endpoint (/api${path}) returned HTML instead of JSON (${res.status}). Check Vercel rewrites and serverless deployment.`
+      : `API endpoint (/api${path}) returned non-JSON response (${res.status}, ${contentType || 'unknown'})`
+  );
 }

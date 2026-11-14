@@ -35,6 +35,7 @@ Configure the following secrets in your hosting environment (never commit real s
 - Tokens are passed to `/api/businesses/:id/google/*` endpoints via `X-Google-Access-Token` headers.
 - Mutating operations (syncing to Google Sheets, generating a Google Doc lead brief) require explicit user confirmation dialogs in the UI.
 - **Custom Hosting Domains (e.g., Vercel)**: Add your production domain (such as `safa-steel-lead-sys.vercel.app`) to **Firebase Console → Project (`reelvision`) → Authentication → Settings → Authorized domains** and to **Google Cloud Console → Credentials → OAuth 2.0 Client (`Authorized JavaScript origins`)** to prevent `auth/unauthorized-domain` errors.
+- **Vercel Serverless & Rewrites**: Keep Node.js `22.x` selected in Vercel Project Settings (`node:sqlite` support) and ensure `vercel.json` excludes `/api/*` from the SPA `index.html` rewrite so `api/[...path].ts` serves JSON responses.
 
 ---
 

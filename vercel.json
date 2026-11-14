@@ -2,11 +2,11 @@
   "version": 2,
   "functions": {
     "api/[...path].ts": {
-      "includeFiles": "public/assets/aistudio/**"
+      "includeFiles": "{public/assets/aistudio/**,firebase-applet-config.json}"
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api/|assets/|sw\\.js).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
