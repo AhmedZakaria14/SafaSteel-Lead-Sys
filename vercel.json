@@ -1,7 +1,11 @@
 {
   "version": 2,
+  "functions": {
+    "api/[...path].ts": {
+      "includeFiles": "public/assets/aistudio/**"
+    }
+  },
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [

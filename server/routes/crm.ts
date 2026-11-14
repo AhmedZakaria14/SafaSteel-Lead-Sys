@@ -54,6 +54,13 @@ export function createCrmRoutes(
           ORDER BY b.created_at DESC
         `)
         .all(user.id, ALSAFA_WORKSPACE_ID) as any[];
+
+      if (user.isOwner && !prodBusinesses.some((b) => b.id === ALSAFA_WORKSPACE_ID)) {
+        const alsafa = db
+          .prepare("SELECT *, 'business_admin' as member_role, 'manager' as account_slot FROM businesses WHERE id = ?")
+          .get(ALSAFA_WORKSPACE_ID) as any;
+        if (alsafa) prodBusinesses.unshift(alsafa);
+      }
     }
 
     const prodIds = new Set(prodBusinesses.map((b) => b.id));

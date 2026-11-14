@@ -17,7 +17,7 @@ export function setApiContext(ctx: ApiContext) {
 
 export async function apiRequest<T = any>(
   path: string,
-  options: RequestInit & { includeGoogleToken?: boolean } = {}
+  options: RequestInit & { includeGoogleToken?: boolean; expectBlob?: boolean } = {}
 ): Promise<T> {
   const headers = new Headers(options.headers || {});
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -56,8 +56,13 @@ export async function apiRequest<T = any>(
     throw new Error(message);
   }
 
+  if (options.expectBlob) {
+    return (await res.blob()) as unknown as T;
+  }
+
   if (contentType.includes('application/json')) {
     return (await res.json()) as T;
   }
-  return (await res.blob()) as unknown as T;
+
+  throw new Error('API endpoint returned non-JSON response');
 }

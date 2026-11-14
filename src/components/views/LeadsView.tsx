@@ -299,7 +299,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
   const handleExport = async (format: 'csv' | 'xlsx') => {
     try {
-      const blob = await apiRequest<Blob>(`/businesses/${businessId}/leads/export?format=${format}`);
+      const blob = await apiRequest<Blob>(`/businesses/${businessId}/leads/export?format=${format}`, {
+        expectBlob: true,
+      });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;

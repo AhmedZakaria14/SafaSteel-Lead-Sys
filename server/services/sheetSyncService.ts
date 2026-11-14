@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SqlDb, normalizePhoneE164 } from '../db.ts';
 import { addSseClient, removeSseClient, broadcastWorkspaceEvent } from './realtimeService.ts';
 import { createAndBroadcastNotification } from './notificationService.ts';
@@ -8,13 +9,13 @@ import { createAndBroadcastNotification } from './notificationService.ts';
 export { addSseClient, removeSseClient, broadcastWorkspaceEvent };
 
 export const ALSAFA_WORKSPACE_ID = 'alsafa-steel-workspace';
-export const ATTACHED_SHEET_PATH = path.join(
-  process.cwd(),
-  'public',
-  'assets',
-  'aistudio',
-  '________________________________e27d1ae1'
-);
+const __sheetServiceDir = path.dirname(fileURLToPath(import.meta.url));
+const CANDIDATE_SHEET_PATHS = [
+  path.join(process.cwd(), 'public', 'assets', 'aistudio', '________________________________e27d1ae1'),
+  path.resolve(__sheetServiceDir, '../../public/assets/aistudio/________________________________e27d1ae1'),
+];
+export const ATTACHED_SHEET_PATH =
+  CANDIDATE_SHEET_PATHS.find((p) => fs.existsSync(p)) || CANDIDATE_SHEET_PATHS[0];
 
 /**
  * RFC-4180 compliant UTF-8 CSV parser handling multiline quoted fields,

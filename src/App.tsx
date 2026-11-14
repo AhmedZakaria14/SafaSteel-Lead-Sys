@@ -298,22 +298,34 @@ function LeadFlowAppInner() {
       setApiContext({ isDemoMode: !firebaseUser || isDemoMode, demoRole });
       const res = await apiRequest<{
         user?: { id?: string };
-        businesses: Business[];
-        demoBusinesses: Business[];
+        businesses?: Business[];
+        demoBusinesses?: Business[];
       }>('/me');
-      setCurrentUserId(res.user?.id || null);
-      setProdBusinesses(res.businesses || []);
-      setDemoBusinesses(res.demoBusinesses || []);
+
+      const prodList = Array.isArray(res?.businesses) ? res.businesses : [];
+      const demoList = Array.isArray(res?.demoBusinesses) ? res.demoBusinesses : [];
+
+      setCurrentUserId(res?.user?.id || null);
+      setProdBusinesses(prodList);
+      setDemoBusinesses(demoList);
 
       const pool =
-        firebaseUser && !isDemoMode && res.businesses.length > 0 ? res.businesses : res.demoBusinesses;
+        firebaseUser && !isDemoMode
+          ? prodList.length > 0
+            ? prodList
+            : demoList
+          : demoList;
       const requestedBiz = pendingDeepLinkRef.current?.businessId;
-      if (pool && pool.length > 0) {
+      if (pool.length > 0) {
+        const alsafa = pool.find((b) => b.id === 'alsafa-steel-workspace');
         if (requestedBiz && pool.some((b) => b.id === requestedBiz)) {
           setActiveBusinessId(requestedBiz);
         } else {
-          setActiveBusinessId((curr) => (pool.some((b) => b.id === curr) ? curr : pool[0].id));
+          setActiveBusinessId((curr) =>
+            curr && pool.some((b) => b.id === curr) ? curr : (alsafa || pool[0]).id
+          );
         }
+        setRefreshCounter((c) => c + 1);
       } else {
         setActiveBusinessId('');
       }
@@ -340,19 +352,19 @@ function LeadFlowAppInner() {
     setAnalyticsLoading(true);
     try {
       const [stagesRes, fieldsRes, membersRes, analyticsRes, notifRes, sheetRes] = await Promise.all([
-        apiRequest<{ stages: PipelineStage[] }>(`/businesses/${bizId}/stages`),
-        apiRequest<{ fields: CustomField[] }>(`/businesses/${bizId}/custom-fields`),
-        apiRequest<{ members: TeamMember[] }>(`/businesses/${bizId}/members`),
+        apiRequest<{ stages?: PipelineStage[] }>(`/businesses/${bizId}/stages`),
+        apiRequest<{ fields?: CustomField[] }>(`/businesses/${bizId}/custom-fields`),
+        apiRequest<{ members?: TeamMember[] }>(`/businesses/${bizId}/members`),
         apiRequest<AnalyticsResponse>(`/businesses/${bizId}/analytics`),
-        apiRequest<{ notifications: NotificationItem[]; unreadCount: number }>(`/businesses/${bizId}/notifications`),
+        apiRequest<{ notifications?: NotificationItem[]; unreadCount?: number }>(`/businesses/${bizId}/notifications`),
         apiRequest<any>(`/businesses/${bizId}/sheet-source/status`).catch(() => null),
       ]);
-      setStages(stagesRes.stages || []);
-      setCustomFields(fieldsRes.fields || []);
-      setMembers(membersRes.members || []);
-      setAnalytics(analyticsRes);
-      setNotifications(notifRes.notifications || []);
-      setUnreadCount(notifRes.unreadCount || 0);
+      setStages(Array.isArray(stagesRes?.stages) ? stagesRes.stages : []);
+      setCustomFields(Array.isArray(fieldsRes?.fields) ? fieldsRes.fields : []);
+      setMembers(Array.isArray(membersRes?.members) ? membersRes.members : []);
+      setAnalytics(analyticsRes || null);
+      setNotifications(Array.isArray(notifRes?.notifications) ? notifRes.notifications : []);
+      setUnreadCount(typeof notifRes?.unreadCount === 'number' ? notifRes.unreadCount : 0);
       if (sheetRes) setSheetStatus(sheetRes);
     } catch (err: any) {
       notify(err.message, 'error');

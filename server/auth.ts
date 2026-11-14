@@ -15,10 +15,15 @@ if (!getApps().length && firebaseConfig?.projectId && firebaseConfig.projectId !
 export const MASTER_OWNER_EMAIL = 'azeco77@gmail.com';
 const ALSAFA_BIZ_ID = 'alsafa-steel-workspace';
 
-async function syncAuthorizedEmailFromAdminFirestore(db: SqlDb, user: AuthUser): Promise<void> {
+async function syncAuthorizedEmailFromFirestore(
+  db: SqlDb,
+  user: AuthUser,
+  idToken?: string
+): Promise<void> {
   if (user.isOwner || user.isDemoUser) return;
+  const projectId = firebaseConfig?.projectId;
   const dbId = (firebaseConfig as { firestoreDatabaseId?: string }).firestoreDatabaseId;
-  if (!dbId || !getApps().length) return;
+  if (!projectId || !dbId) return;
 
   try {
     const existing = db
@@ -26,17 +31,55 @@ async function syncAuthorizedEmailFromAdminFirestore(db: SqlDb, user: AuthUser):
       .get(ALSAFA_BIZ_ID, user.id);
     if (existing) return;
 
-    const adminFs = getAdminFirestore(getApps()[0], dbId);
-    const snap = await Promise.race([
-      adminFs.collection('authorized_emails').doc(user.email.toLowerCase()).get(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
-    ]);
-    if (!snap || !snap.exists) return;
-    const data = snap.data() as Record<string, any> | undefined;
-    if (!data || data.status === 'inactive') return;
+    let displayName: string | undefined;
+    let accountType: 'manager' | 'accountant' = 'accountant';
+    let isActiveInFirestore = false;
+
+    // 1. Try Firestore REST API using the user's own verified Firebase ID Token (enforces firestore.rules natively)
+    if (idToken) {
+      const normalized = user.email.toLowerCase();
+      const restUrl = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/databases/${encodeURIComponent(dbId)}/documents/authorized_emails/${encodeURIComponent(normalized)}`;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 1500);
+      try {
+        const resp = await fetch(restUrl, {
+          headers: { Authorization: `Bearer ${idToken}` },
+          signal: controller.signal,
+        });
+        if (resp.ok) {
+          const docJson = (await resp.json()) as { fields?: Record<string, { stringValue?: string }> };
+          const statusVal = docJson.fields?.status?.stringValue || 'active';
+          if (statusVal !== 'inactive') {
+            isActiveInFirestore = true;
+            displayName = docJson.fields?.displayName?.stringValue;
+            accountType = docJson.fields?.accountType?.stringValue === 'manager' ? 'manager' : 'accountant';
+          }
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // 2. Fallback to Admin SDK when GCP credentials are present
+    if (!isActiveInFirestore && getApps().length) {
+      const adminFs = getAdminFirestore(getApps()[0], dbId);
+      const snap = await Promise.race([
+        adminFs.collection('authorized_emails').doc(user.email.toLowerCase()).get(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200)),
+      ]);
+      if (snap && snap.exists) {
+        const data = snap.data() as Record<string, any> | undefined;
+        if (data && data.status !== 'inactive') {
+          isActiveInFirestore = true;
+          displayName = data.displayName;
+          accountType = data.accountType === 'manager' ? 'manager' : 'accountant';
+        }
+      }
+    }
+
+    if (!isActiveInFirestore) return;
 
     const now = new Date().toISOString();
-    const slot = data.accountType === 'manager' ? 'manager' : 'accountant';
     db.prepare(`
       INSERT INTO business_memberships (id, business_id, user_id, invited_email, display_name, account_slot, role, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'business_admin', 'active', ?, ?)
@@ -51,13 +94,13 @@ async function syncAuthorizedEmailFromAdminFirestore(db: SqlDb, user: AuthUser):
       ALSAFA_BIZ_ID,
       user.id,
       user.email.toLowerCase(),
-      data.displayName || user.fullName,
-      slot,
+      displayName || user.fullName,
+      accountType,
       now,
       now
     );
   } catch {
-    // Ignore when running locally without GCP service credentials; client Firestore sync handles enrollment
+    // Ignore transient network errors; local DB / client sync handles fallback
   }
 }
 
@@ -203,7 +246,7 @@ export function createAuthMiddleware(db: SqlDb, verifier: TokenVerifier = defaul
       try {
         const verified = await verifier(token);
         const user = upsertUserFromAuth(db, verified);
-        await syncAuthorizedEmailFromAdminFirestore(db, user);
+        await syncAuthorizedEmailFromFirestore(db, user, token);
         req.authUser = user;
         return next();
       } catch (err) {

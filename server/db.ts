@@ -8,8 +8,9 @@ export type SqlDb = DatabaseSync;
 let singletonDb: SqlDb | null = null;
 
 export function createDatabase(dbPath?: string): SqlDb {
+  const defaultDir = process.env.VERCEL ? '/tmp' : path.join(process.cwd(), '.data');
   const resolvedPath =
-    dbPath || process.env.DATABASE_PATH || path.join(process.cwd(), '.data', 'leadflow.db');
+    dbPath || process.env.DATABASE_PATH || path.join(defaultDir, 'leadflow.db');
 
   if (resolvedPath !== ':memory:') {
     const dir = path.dirname(resolvedPath);
