@@ -123,7 +123,7 @@ export const FollowUpsView: React.FC<FollowUpsViewProps> = ({
                   <div className="text-xs text-slate-500 dark:text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
                     <button
                       type="button"
-                      onClick={() => onSelectLead(task.lead_id)}
+                      onClick={() => onSelectLead(task.lead_id || task.lead_code || '')}
                       className="inline-flex items-center gap-1 font-medium text-blue-600 hover:underline min-h-[32px]"
                     >
                       <span>{task.lead_name} ({task.lead_code})</span>

@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { SqlDb, normalizePhoneE164 } from '../db.ts';
+import { SqlDb, deterministicSheetLeadId, normalizePhoneE164 } from '../db.ts';
 import { addSseClient, removeSseClient, broadcastWorkspaceEvent } from './realtimeService.ts';
 import { createAndBroadcastNotification } from './notificationService.ts';
 
@@ -383,7 +383,7 @@ export function syncSheetRowsToWorkspace(
         rawId ||
         crypto
           .createHash('sha1')
-          .update(`${sourceLabel}:${rawName}:${phoneE164 || rawPhone}:${rawEmail}`)
+          .update(`sheet-row:${rawName.toLowerCase()}:${phoneE164 || rawPhone}:${rawEmail.toLowerCase()}:${cell(idxCreatedTime)}`)
           .digest('hex')
           .slice(0, 20);
 
@@ -456,7 +456,9 @@ export function syncSheetRowsToWorkspace(
       const existing = existingByExtId.get(externalRowId);
 
       if (!existing) {
-        const leadId = crypto.randomUUID();
+        const candidateId = deterministicSheetLeadId(businessId, externalRowId);
+        const idTaken = db.prepare('SELECT 1 FROM leads WHERE id = ?').get(candidateId);
+        const leadId = idTaken ? crypto.randomUUID() : candidateId;
         const leadCode = `LD-${nextLeadNum++}`;
         const metaLeadgenId = rawId.startsWith('l:') ? rawId : null;
 

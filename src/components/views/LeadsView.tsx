@@ -38,7 +38,7 @@ interface LeadsViewProps {
   stages: PipelineStage[];
   customFields: CustomField[];
   members: TeamMember[];
-  onSelectLead: (leadId: string) => void;
+  onSelectLead: (leadId: string, lead?: Lead) => void;
   onAddLead: () => void;
   onNotify: (msg: string, variant?: 'success' | 'error' | 'info') => void;
   onLeadReadChanged?: () => void;
@@ -271,13 +271,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
 
   const handleToggleLeadRead = async (leadId: string, nextIsRead: boolean, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    const prevLead = leads.find((l) => l.id === leadId) || peekLead;
+    const prevLead = leads.find((l) => l.id === leadId) || (peekLead?.id === leadId ? peekLead : undefined);
     const prevRead = Boolean(prevLead?.is_read);
     applyLeadReadStateLocally(leadId, nextIsRead);
     try {
-      await apiRequest(`/businesses/${businessId}/leads/${leadId}/read`, {
+      await apiRequest(`/businesses/${businessId}/leads/${encodeURIComponent(leadId)}/read`, {
         method: 'POST',
-        body: JSON.stringify({ isRead: nextIsRead }),
+        body: JSON.stringify({
+          isRead: nextIsRead,
+          leadCode: prevLead?.lead_code,
+          externalRowId: prevLead?.external_row_id,
+          phone: prevLead?.phone_e164 || prevLead?.phone,
+        }),
       });
       if (readState) {
         fetchLeads();
@@ -304,9 +309,14 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     setPeekLead({ ...lead, is_read: 1, read_at: lead.read_at || new Date().toISOString() });
     if (!lead.is_read) {
       applyLeadReadStateLocally(lead.id, true);
-      apiRequest(`/businesses/${businessId}/leads/${lead.id}/read`, {
+      apiRequest(`/businesses/${businessId}/leads/${encodeURIComponent(lead.id)}/read`, {
         method: 'POST',
-        body: JSON.stringify({ isRead: true }),
+        body: JSON.stringify({
+          isRead: true,
+          leadCode: lead.lead_code,
+          externalRowId: lead.external_row_id,
+          phone: lead.phone_e164 || lead.phone,
+        }),
       })
         .then(() => {
           onLeadReadChanged?.();
@@ -320,13 +330,18 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const handleQuickStatusUpdate = async (leadId: string, statusId: string) => {
     if (!statusId) return;
     setUpdatingLeadId(leadId);
+    const targetBefore = leads.find((l) => l.id === leadId) || (peekLead?.id === leadId ? peekLead : undefined);
     try {
-      await apiRequest(`/businesses/${businessId}/leads/${leadId}/status`, {
+      await apiRequest(`/businesses/${businessId}/leads/${encodeURIComponent(leadId)}/status`, {
         method: 'POST',
-        body: JSON.stringify({ statusId }),
+        body: JSON.stringify({
+          statusId,
+          leadCode: targetBefore?.lead_code,
+          externalRowId: targetBefore?.external_row_id,
+          phone: targetBefore?.phone_e164 || targetBefore?.phone,
+        }),
       });
       const stage = stages.find((s) => s.id === statusId);
-      const targetBefore = leads.find((l) => l.id === leadId);
       const wasUnread = targetBefore ? !targetBefore.is_read : false;
       setLeads((prev) =>
         prev.map((l) =>
@@ -824,7 +839,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                 return (
                   <div
                     key={lead.id}
-                    onClick={() => onSelectLead(lead.id)}
+                    onClick={() => onSelectLead(lead.id, lead)}
                     className={`p-3.5 space-y-2.5 border-s-4 transition-colors crm-cv-auto ${
                       isUnread
                         ? 'border-s-red-600 bg-red-50/75 dark:bg-red-950/25 active:bg-red-100/75 dark:active:bg-red-950/40'
@@ -1005,7 +1020,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => onSelectLead(lead.id)}
+                          onClick={() => onSelectLead(lead.id, lead)}
                           className="inline-flex items-center justify-center rounded-lg bg-[#0F1E3D] dark:bg-blue-600 text-white min-h-[38px] min-w-[38px]"
                           aria-label={isAr ? 'فتح الملف' : 'Open profile'}
                         >
@@ -1110,7 +1125,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   return (
                     <tr
                       key={lead.id}
-                      onClick={() => onSelectLead(lead.id)}
+                      onClick={() => onSelectLead(lead.id, lead)}
                       className={`group cursor-pointer border-s-4 transition-colors duration-150 ${
                         isPeeking
                           ? 'border-s-blue-600 bg-blue-50/70 dark:bg-blue-950/30'
@@ -1733,9 +1748,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const id = peekLead.id;
+                  const target = peekLead;
                   setPeekLead(null);
-                  onSelectLead(id);
+                  onSelectLead(target.id, target);
                 }}
                 className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0F1E3D] hover:bg-[#162B54] dark:bg-blue-600 dark:hover:bg-blue-700 px-4 min-h-[42px] sm:min-h-0 sm:py-2 text-xs font-semibold text-white transition-colors"
               >

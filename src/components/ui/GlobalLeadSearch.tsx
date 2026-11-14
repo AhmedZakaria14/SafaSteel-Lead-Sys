@@ -6,7 +6,7 @@ import { apiRequest } from '../../lib/api';
 interface GlobalLeadSearchProps {
   lang: Language;
   businessId: string;
-  onSelectLead: (leadId: string) => void;
+  onSelectLead: (leadId: string, lead?: Lead) => void;
   onViewAllLeads?: () => void;
   variant?: 'dashboard' | 'topbar';
 }
@@ -108,10 +108,10 @@ export const GlobalLeadSearch: React.FC<GlobalLeadSearchProps> = ({
     };
   }, [businessId, query]);
 
-  const handleChooseLead = (leadId: string) => {
+  const handleChooseLead = (lead: Lead) => {
     setOpen(false);
     setQuery('');
-    onSelectLead(leadId);
+    onSelectLead(lead.id, lead);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -128,7 +128,7 @@ export const GlobalLeadSearch: React.FC<GlobalLeadSearchProps> = ({
     } else if (e.key === 'Enter') {
       e.preventDefault();
       const target = results[activeIndex] || results[0];
-      if (target) handleChooseLead(target.id);
+      if (target) handleChooseLead(target);
     } else if (e.key === 'Escape') {
       setOpen(false);
     }
@@ -242,7 +242,7 @@ export const GlobalLeadSearch: React.FC<GlobalLeadSearchProps> = ({
                     key={lead.id}
                     type="button"
                     onMouseEnter={() => setActiveIndex(idx)}
-                    onClick={() => handleChooseLead(lead.id)}
+                    onClick={() => handleChooseLead(lead)}
                     className={`w-full text-start px-3.5 sm:px-4 py-3 min-h-[52px] border-s-4 flex items-center justify-between gap-3 transition-colors ${
                       isUnread
                         ? 'border-s-red-600 ' +

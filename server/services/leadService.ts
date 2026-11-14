@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { SqlDb, generateLeadCode, normalizePhoneE164 } from '../db.ts';
+import { SqlDb, deterministicSheetLeadId, generateLeadCode, normalizePhoneE164 } from '../db.ts';
 import { createAndBroadcastNotification } from './notificationService.ts';
 
 export interface CreateLeadInput {
@@ -28,6 +28,154 @@ export interface CreateLeadInput {
   nextFollowUpAt?: string | null;
   actorUserId?: string | null;
   createdAt?: string;
+}
+
+export interface LeadLookupHints {
+  leadCode?: string | null;
+  externalRowId?: string | null;
+  phone?: string | null;
+}
+
+export function resolveValidUserId(db: SqlDb, userId?: string | null): string | null {
+  if (!userId || typeof userId !== 'string') return null;
+  const trimmed = userId.trim();
+  if (!trimmed) return null;
+  const row = db.prepare('SELECT id FROM users WHERE id = ?').get(trimmed) as { id: string } | undefined;
+  return row?.id || null;
+}
+
+export function resolveStageRecord(db: SqlDb, businessId: string, statusIdentifier?: string | null): any | null {
+  if (!statusIdentifier || typeof statusIdentifier !== 'string') return null;
+  const raw = statusIdentifier.trim();
+  if (!raw) return null;
+
+  const byId = db
+    .prepare('SELECT * FROM lead_statuses WHERE id = ? AND business_id = ?')
+    .get(raw, businessId) as any;
+  if (byId) return byId;
+
+  const byKeyOrName = db
+    .prepare(
+      'SELECT * FROM lead_statuses WHERE business_id = ? AND (LOWER(key) = LOWER(?) OR LOWER(name_ar) = LOWER(?) OR LOWER(name_en) = LOWER(?)) LIMIT 1'
+    )
+    .get(businessId, raw, raw, raw) as any;
+  if (byKeyOrName) return byKeyOrName;
+
+  return null;
+}
+
+const LEAD_SELECT_ENRICHED = `
+  SELECT l.*,
+         s.key as status_key, s.name_ar as status_name_ar, s.name_en as status_name_en, s.color as status_color,
+         u.full_name as assigned_employee_name, u.email as assigned_employee_email,
+         b.name as business_name
+  FROM leads l
+  LEFT JOIN lead_statuses s ON s.id = l.status_id
+  LEFT JOIN users u ON u.id = l.assigned_to_user_id
+  LEFT JOIN businesses b ON b.id = l.business_id
+`;
+
+export function resolveLeadRecord(
+  db: SqlDb,
+  businessId: string,
+  rawLeadId?: string | null,
+  hints?: LeadLookupHints
+): any | null {
+  const candidates: string[] = [];
+  if (rawLeadId && typeof rawLeadId === 'string') {
+    const trimmed = rawLeadId.trim();
+    if (trimmed) {
+      candidates.push(trimmed);
+      try {
+        const decoded = decodeURIComponent(trimmed).trim();
+        if (decoded && decoded !== trimmed) candidates.push(decoded);
+      } catch {
+        // ignore malformed URI encoding
+      }
+    }
+  }
+
+  for (const cand of candidates) {
+    // 1. Direct primary key match
+    const byId = db
+      .prepare(`${LEAD_SELECT_ENRICHED} WHERE l.id = ? AND l.business_id = ?`)
+      .get(cand, businessId) as any;
+    if (byId) return byId;
+
+    // 2. Match by lead_code (e.g. LD-1001 or 1001)
+    const normalizedCode = /^\d+$/.test(cand) ? `LD-${cand}` : cand;
+    const byCode = db
+      .prepare(`${LEAD_SELECT_ENRICHED} WHERE LOWER(l.lead_code) = LOWER(?) AND l.business_id = ? LIMIT 1`)
+      .get(normalizedCode, businessId) as any;
+    if (byCode) return byCode;
+
+    // 3. Match by external_row_id, meta_leadgen_id, or deterministic ID derived from external_row_id
+    const altExt = /^\d{8,}$/.test(cand) ? `l:${cand}` : cand;
+    const detFromCand = deterministicSheetLeadId(businessId, cand);
+    const detFromAlt = deterministicSheetLeadId(businessId, altExt);
+    const byExt = db
+      .prepare(
+        `${LEAD_SELECT_ENRICHED}
+         WHERE l.business_id = ?
+           AND (l.external_row_id = ? OR l.external_row_id = ? OR l.meta_leadgen_id = ? OR l.id = ? OR l.id = ?)
+         LIMIT 1`
+      )
+      .get(businessId, cand, altExt, cand, detFromCand, detFromAlt) as any;
+    if (byExt) return byExt;
+
+    // 4. Match pre-migration _legacy_id stored in custom_values_json
+    if (cand.length >= 8) {
+      const byLegacy = db
+        .prepare(`${LEAD_SELECT_ENRICHED} WHERE l.business_id = ? AND l.custom_values_json LIKE ? LIMIT 1`)
+        .get(businessId, `%"_legacy_id":"${cand.replace(/["%_]/g, '')}"%`) as any;
+      if (byLegacy) return byLegacy;
+    }
+  }
+
+  // 5. Fallback to explicit hints (externalRowId, leadCode, phone) sent by frontend
+  if (hints?.externalRowId && typeof hints.externalRowId === 'string' && hints.externalRowId.trim()) {
+    const ext = hints.externalRowId.trim();
+    const detId = deterministicSheetLeadId(businessId, ext);
+    const byHintExt = db
+      .prepare(`${LEAD_SELECT_ENRICHED} WHERE l.business_id = ? AND (l.external_row_id = ? OR l.id = ?) LIMIT 1`)
+      .get(businessId, ext, detId) as any;
+    if (byHintExt) return byHintExt;
+  }
+
+  if (hints?.leadCode && typeof hints.leadCode === 'string' && hints.leadCode.trim()) {
+    const code = hints.leadCode.trim();
+    const byHintCode = db
+      .prepare(`${LEAD_SELECT_ENRICHED} WHERE l.business_id = ? AND LOWER(l.lead_code) = LOWER(?) LIMIT 1`)
+      .get(businessId, code) as any;
+    if (byHintCode) return byHintCode;
+  }
+
+  if (hints?.phone && typeof hints.phone === 'string' && hints.phone.trim()) {
+    const ph = hints.phone.trim();
+    const byHintPhone = db
+      .prepare(`${LEAD_SELECT_ENRICHED} WHERE l.business_id = ? AND (l.phone_e164 = ? OR l.phone = ?) LIMIT 1`)
+      .get(businessId, ph, ph) as any;
+    if (byHintPhone) return byHintPhone;
+  }
+
+  // 6. Check if rawLeadId came from an older notification link_path containing (LD-xxxx) in its message
+  for (const cand of candidates) {
+    const notif = db
+      .prepare('SELECT title_ar, message_ar, message_en FROM notifications WHERE business_id = ? AND link_path = ? LIMIT 1')
+      .get(businessId, `/leads/${cand}`) as { title_ar?: string; message_ar?: string; message_en?: string } | undefined;
+    if (notif) {
+      const combined = `${notif.message_ar || ''} ${notif.message_en || ''} ${notif.title_ar || ''}`;
+      const codeMatch = combined.match(/\b(LD-\d+)\b/i);
+      if (codeMatch) {
+        const byNotifCode = db
+          .prepare(`${LEAD_SELECT_ENRICHED} WHERE l.business_id = ? AND LOWER(l.lead_code) = LOWER(?) LIMIT 1`)
+          .get(businessId, codeMatch[1]) as any;
+        if (byNotifCode) return byNotifCode;
+      }
+    }
+  }
+
+  return null;
 }
 
 export function pickNextRoundRobinEmployee(db: SqlDb, businessId: string): string | null {
@@ -121,7 +269,7 @@ export function createLeadRecord(db: SqlDb, input: CreateLeadInput) {
     }
   }
 
-  let statusId = input.statusId;
+  let statusId = input.statusId ? resolveStageRecord(db, input.businessId, input.statusId)?.id || null : null;
   if (!statusId) {
     const defaultStage = db
       .prepare('SELECT id FROM lead_statuses WHERE business_id = ? ORDER BY is_default DESC, sort_order ASC LIMIT 1')
@@ -129,13 +277,19 @@ export function createLeadRecord(db: SqlDb, input: CreateLeadInput) {
     statusId = defaultStage?.id || null;
   }
 
-  let assignedTo = input.assignedToUserId ?? null;
+  let assignedTo = resolveValidUserId(db, input.assignedToUserId);
   if (!assignedTo) {
     assignedTo = pickNextRoundRobinEmployee(db, input.businessId);
   }
 
+  const validActorId = resolveValidUserId(db, input.actorUserId);
   const now = input.createdAt || new Date().toISOString();
-  const leadId = crypto.randomUUID();
+  const candidateId = input.externalRowId
+    ? deterministicSheetLeadId(input.businessId, input.externalRowId)
+    : crypto.randomUUID();
+  const leadId = db.prepare('SELECT 1 FROM leads WHERE id = ?').get(candidateId)
+    ? crypto.randomUUID()
+    : candidateId;
   const leadCode = generateLeadCode(input.businessId, db);
   const phoneE164 = normalizePhoneE164(input.phone, biz.default_country_code);
   const duplicates = findDuplicateLeads(db, input.businessId, phoneE164, input.email);
@@ -187,7 +341,7 @@ export function createLeadRecord(db: SqlDb, input: CreateLeadInput) {
     crypto.randomUUID(),
     input.businessId,
     leadId,
-    input.actorUserId || null,
+    validActorId,
     `تم تسجيل عميل محتمل جديد (${input.fullName.trim()}) عبر ${input.source || 'manual'}`,
     `New lead captured (${input.fullName.trim()}) via ${input.source || 'manual'}`,
     JSON.stringify({ source: input.source || 'manual', leadCode }),
@@ -198,7 +352,7 @@ export function createLeadRecord(db: SqlDb, input: CreateLeadInput) {
     db.prepare(`
       INSERT INTO lead_notes (id, business_id, lead_id, author_user_id, content, created_at)
       VALUES (?, ?, ?, ?, ?, ?)
-    `).run(crypto.randomUUID(), input.businessId, leadId, input.actorUserId || null, input.notesSummary, now);
+    `).run(crypto.randomUUID(), input.businessId, leadId, validActorId, input.notesSummary, now);
   }
 
   // Notification for new lead (broadcast live via SSE + push)
@@ -244,22 +398,21 @@ export function changeLeadStatus(
     toStatusId: string;
     actorUserId?: string | null;
     note?: string | null;
+    hints?: LeadLookupHints;
   }
 ) {
-  const lead = db
-    .prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?')
-    .get(params.leadId, params.businessId) as any;
+  const lead = resolveLeadRecord(db, params.businessId, params.leadId, params.hints);
   if (!lead) throw new Error('Lead not found');
 
-  const toStatus = db
-    .prepare('SELECT * FROM lead_statuses WHERE id = ? AND business_id = ?')
-    .get(params.toStatusId, params.businessId) as any;
+  const canonicalLeadId = lead.id;
+  const toStatus = resolveStageRecord(db, params.businessId, params.toStatusId);
   if (!toStatus) throw new Error('Target pipeline stage not found');
 
   const fromStatus = lead.status_id
     ? (db.prepare('SELECT * FROM lead_statuses WHERE id = ?').get(lead.status_id) as any)
     : null;
 
+  const validActorId = resolveValidUserId(db, params.actorUserId);
   const now = new Date().toISOString();
   db.prepare(`
     UPDATE leads
@@ -270,7 +423,7 @@ export function changeLeadStatus(
         read_by_user_id = COALESCE(read_by_user_id, ?),
         updated_at = ?
     WHERE id = ? AND business_id = ?
-  `).run(params.toStatusId, now, now, params.actorUserId || null, now, params.leadId, params.businessId);
+  `).run(toStatus.id, now, now, validActorId, now, canonicalLeadId, params.businessId);
 
   db.prepare(`
     INSERT INTO lead_status_history (id, business_id, lead_id, from_status_id, to_status_id, changed_by_user_id, note, created_at)
@@ -278,10 +431,10 @@ export function changeLeadStatus(
   `).run(
     crypto.randomUUID(),
     params.businessId,
-    params.leadId,
+    canonicalLeadId,
     lead.status_id || null,
-    params.toStatusId,
-    params.actorUserId || null,
+    toStatus.id,
+    validActorId,
     params.note || null,
     now
   );
@@ -292,11 +445,11 @@ export function changeLeadStatus(
   `).run(
     crypto.randomUUID(),
     params.businessId,
-    params.leadId,
-    params.actorUserId || null,
+    canonicalLeadId,
+    validActorId,
     `تم تغيير الحالة من "${fromStatus?.name_ar || '—'}" إلى "${toStatus.name_ar}"`,
     `Status changed from "${fromStatus?.name_en || '—'}" to "${toStatus.name_en}"`,
-    JSON.stringify({ fromStatusId: lead.status_id, toStatusId: params.toStatusId, note: params.note || null }),
+    JSON.stringify({ fromStatusId: lead.status_id, toStatusId: toStatus.id, note: params.note || null }),
     now
   );
 
@@ -309,8 +462,8 @@ export function changeLeadStatus(
       titleEn: `Lead Converted: ${lead.full_name}`,
       messageAr: `تم تحويل العميل ${lead.full_name} (${lead.lead_code}) بنجاح`,
       messageEn: `${lead.full_name} (${lead.lead_code}) has been converted`,
-      linkPath: `/leads/${lead.id}`,
-      leadId: lead.id,
+      linkPath: `/leads/${canonicalLeadId}`,
+      leadId: canonicalLeadId,
       createdAt: now,
     });
   } else {
@@ -322,11 +475,11 @@ export function changeLeadStatus(
       titleEn: `Stage Updated: ${lead.full_name}`,
       messageAr: `تم تغيير المرحلة من "${fromStatus?.name_ar || '—'}" إلى "${toStatus.name_ar}" (${lead.lead_code})`,
       messageEn: `Moved from "${fromStatus?.name_en || '—'}" to "${toStatus.name_en}" (${lead.lead_code})`,
-      linkPath: `/leads/${lead.id}`,
-      leadId: lead.id,
+      linkPath: `/leads/${canonicalLeadId}`,
+      leadId: canonicalLeadId,
       createdAt: now,
     });
   }
 
-  return db.prepare('SELECT * FROM leads WHERE id = ?').get(params.leadId);
+  return resolveLeadRecord(db, params.businessId, canonicalLeadId);
 }

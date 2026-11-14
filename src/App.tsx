@@ -35,6 +35,7 @@ import {
   Business,
   CustomField,
   Language,
+  Lead,
   NotificationItem,
   PipelineStage,
   Role,
@@ -137,6 +138,7 @@ function LeadFlowAppInner() {
 
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [selectedLeadPreview, setSelectedLeadPreview] = useState<Lead | null>(null);
 
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
@@ -373,12 +375,13 @@ function LeadFlowAppInner() {
     }
   };
 
-  const navigateToLead = (leadId: string, targetBusinessId?: string | null) => {
+  const navigateToLead = (leadId: string, targetBusinessId?: string | null, initialLead?: Lead | null) => {
     if (targetBusinessId && allBusinesses.some((b) => b.id === targetBusinessId) && targetBusinessId !== activeBusinessId) {
       pendingDeepLinkRef.current = { leadId, businessId: targetBusinessId };
       setActiveBusinessId(targetBusinessId);
     }
     setActiveTab('leads');
+    setSelectedLeadPreview(initialLead || null);
     setSelectedLeadId(leadId);
     setShowNotifMenu(false);
     syncLeadUrl(leadId);
@@ -386,6 +389,7 @@ function LeadFlowAppInner() {
 
   const handleCloseLeadDetail = () => {
     setSelectedLeadId(null);
+    setSelectedLeadPreview(null);
     syncLeadUrl(null);
   };
 
@@ -406,17 +410,20 @@ function LeadFlowAppInner() {
     linkPath: string,
     targetBusinessId?: string | null,
     notifId?: string | null,
-    explicitLeadId?: string | null
+    explicitLeadId?: string | null,
+    notifMessageHint?: string | null
   ) => {
     if (notifId) {
       markSingleNotificationRead(notifId);
     }
-    const leadId = explicitLeadId || extractLeadIdFromLinkPath(linkPath);
+    const codeMatch = notifMessageHint ? notifMessageHint.match(/\b(LD-\d+)\b/i) : null;
+    const leadId = explicitLeadId || extractLeadIdFromLinkPath(linkPath) || (codeMatch ? codeMatch[1].toUpperCase() : null);
     if (leadId) {
-      navigateToLead(leadId, targetBusinessId);
+      navigateToLead(leadId, targetBusinessId, null);
       return;
     }
     setSelectedLeadId(null);
+    setSelectedLeadPreview(null);
     syncLeadUrl(null);
     setShowNotifMenu(false);
     if (linkPath.startsWith('/integrations')) setActiveTab('integrations');
@@ -1036,9 +1043,10 @@ function LeadFlowAppInner() {
                 lang={lang}
                 businessId={activeBusiness.id}
                 variant="topbar"
-                onSelectLead={(id) => navigateToLead(id)}
+                onSelectLead={(id, lead) => navigateToLead(id, activeBusiness.id, lead)}
                 onViewAllLeads={() => {
                   setSelectedLeadId(null);
+                  setSelectedLeadPreview(null);
                   syncLeadUrl(null);
                   setActiveTab('leads');
                 }}
@@ -1220,7 +1228,15 @@ function LeadFlowAppInner() {
                           <button
                             key={n.id}
                             type="button"
-                            onClick={() => navigateToLinkPath(n.link_path || '/leads', activeBusinessId, n.id)}
+                            onClick={() =>
+                              navigateToLinkPath(
+                                n.link_path || '/leads',
+                                activeBusinessId,
+                                n.id,
+                                null,
+                                `${n.title_ar || ''} ${n.message_ar || ''} ${n.message_en || ''}`
+                              )
+                            }
                             className={`w-full text-start p-3.5 text-xs flex items-start justify-between gap-3 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
                               n.is_read ? 'opacity-70' : 'bg-blue-50/45 dark:bg-blue-950/25'
                             }`}
@@ -1287,13 +1303,14 @@ function LeadFlowAppInner() {
               lang={lang}
               businessId={activeBusiness.id}
               variant="topbar"
-              onSelectLead={(id) => {
+              onSelectLead={(id, lead) => {
                 setMobileSearchOpen(false);
-                navigateToLead(id);
+                navigateToLead(id, activeBusiness.id, lead);
               }}
               onViewAllLeads={() => {
                 setMobileSearchOpen(false);
                 setSelectedLeadId(null);
+                setSelectedLeadPreview(null);
                 syncLeadUrl(null);
                 setActiveTab('leads');
               }}
@@ -1390,6 +1407,7 @@ function LeadFlowAppInner() {
                 lang={lang}
                 businessId={activeBusiness.id}
                 leadId={selectedLeadId}
+                initialLead={selectedLeadPreview}
                 userRole={effectiveRole}
                 stages={stages}
                 customFields={customFields}
@@ -1404,7 +1422,7 @@ function LeadFlowAppInner() {
                 businessId={activeBusiness.id}
                 analytics={analytics}
                 loading={analyticsLoading}
-                onSelectLead={(id) => navigateToLead(id)}
+                onSelectLead={(id, lead) => navigateToLead(id, activeBusiness.id, lead)}
                 onNavigateLeads={() => setActiveTab('leads')}
                 onNavigateFollowUps={() => setActiveTab('followups')}
                 onAddLead={() => setShowCreateLeadModal(true)}
@@ -1417,7 +1435,7 @@ function LeadFlowAppInner() {
                 stages={stages}
                 customFields={customFields}
                 members={members}
-                onSelectLead={(id) => navigateToLead(id)}
+                onSelectLead={(id, lead) => navigateToLead(id, activeBusiness.id, lead)}
                 onAddLead={() => setShowCreateLeadModal(true)}
                 onNotify={notify}
                 onLeadReadChanged={() => setRefreshCounter((c) => c + 1)}
@@ -1429,7 +1447,7 @@ function LeadFlowAppInner() {
                 businessId={activeBusiness.id}
                 userRole={effectiveRole}
                 stages={stages}
-                onSelectLead={(id) => navigateToLead(id)}
+                onSelectLead={(id, lead) => navigateToLead(id, activeBusiness.id, lead)}
                 onStagesChanged={() => setRefreshCounter((c) => c + 1)}
                 onNotify={notify}
               />
@@ -1437,7 +1455,7 @@ function LeadFlowAppInner() {
               <FollowUpsView
                 lang={lang}
                 businessId={activeBusiness.id}
-                onSelectLead={(id) => navigateToLead(id)}
+                onSelectLead={(id) => navigateToLead(id, activeBusiness.id, null)}
                 onNotify={notify}
               />
             ) : activeTab === 'campaigns' ? (

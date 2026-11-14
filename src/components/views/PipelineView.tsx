@@ -9,7 +9,7 @@ interface PipelineViewProps {
   businessId: string;
   userRole: Role;
   stages: PipelineStage[];
-  onSelectLead: (leadId: string) => void;
+  onSelectLead: (leadId: string, lead?: Lead) => void;
   onStagesChanged: () => void;
   onNotify: (msg: string, variant?: 'success' | 'error' | 'info') => void;
 }
@@ -50,6 +50,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
 
   const moveLeadToStage = async (leadId: string, toStatusId: string) => {
     const prevLeads = [...leads];
+    const targetLead = leads.find((l) => l.id === leadId);
     const targetStage = stages.find((s) => s.id === toStatusId);
     setLeads((curr) =>
       curr.map((l) =>
@@ -66,9 +67,14 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
       )
     );
     try {
-      await apiRequest(`/businesses/${businessId}/leads/${leadId}/status`, {
+      await apiRequest(`/businesses/${businessId}/leads/${encodeURIComponent(leadId)}/status`, {
         method: 'POST',
-        body: JSON.stringify({ statusId: toStatusId }),
+        body: JSON.stringify({
+          statusId: toStatusId,
+          leadCode: targetLead?.lead_code,
+          externalRowId: targetLead?.external_row_id,
+          phone: targetLead?.phone_e164 || targetLead?.phone,
+        }),
       });
       onNotify(isAr ? 'تم نقل العميل وتحديث سجل النشاط' : 'Lead moved and activity recorded', 'success');
     } catch (err: any) {
@@ -318,7 +324,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                       key={lead.id}
                       draggable
                       onDragStart={() => setDraggingId(lead.id)}
-                      onClick={() => onSelectLead(lead.id)}
+                      onClick={() => onSelectLead(lead.id, lead)}
                       className={`rounded-lg border border-s-4 p-3 cursor-grab active:cursor-grabbing transition-colors crm-cv-auto ${
                         isUnread
                           ? 'border-red-200 dark:border-red-900/70 border-s-red-600 bg-red-50/75 dark:bg-red-950/25 hover:border-red-400'

@@ -17,7 +17,14 @@ import {
   verifyPassword,
   writeAuditLog,
 } from '../auth.ts';
-import { changeLeadStatus, createLeadRecord, findDuplicateLeads } from '../services/leadService.ts';
+import {
+  changeLeadStatus,
+  createLeadRecord,
+  findDuplicateLeads,
+  resolveLeadRecord,
+  resolveStageRecord,
+  resolveValidUserId,
+} from '../services/leadService.ts';
 import { resetDemoData } from '../seedDemo.ts';
 import {
   ALSAFA_WORKSPACE_ID,
@@ -737,8 +744,9 @@ export function createCrmRoutes(
     }
 
     if (statusId) {
+      const resolvedStage = resolveStageRecord(db, businessId, statusId);
       where.push('l.status_id = ?');
-      params.push(statusId);
+      params.push(resolvedStage?.id || statusId);
     }
     if (source) {
       where.push('l.source = ?');
@@ -877,6 +885,7 @@ export function createCrmRoutes(
         return res.status(400).json({ error: 'leadIds array is required' });
       }
 
+      const validActorId = resolveValidUserId(db, req.authUser?.id);
       let updated = 0;
       if (action === 'status' && statusId) {
         for (const leadId of leadIds) {
@@ -885,7 +894,7 @@ export function createCrmRoutes(
               businessId,
               leadId,
               toStatusId: statusId,
-              actorUserId: req.authUser?.id,
+              actorUserId: validActorId,
               note: 'Bulk status update',
             });
             updated += 1;
@@ -895,17 +904,20 @@ export function createCrmRoutes(
         }
       } else if (action === 'assign') {
         const now = new Date().toISOString();
+        const validAssigneeId = resolveValidUserId(db, assignedToUserId);
         const stmt = db.prepare(
           'UPDATE leads SET assigned_to_user_id = ?, is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?), updated_at = ? WHERE id = ? AND business_id = ?'
         );
-        for (const leadId of leadIds) {
-          const info = stmt.run(assignedToUserId || null, now, req.authUser?.id || null, now, leadId, businessId);
+        for (const rawId of leadIds) {
+          const resolved = resolveLeadRecord(db, businessId, String(rawId));
+          const canonicalId = resolved?.id || String(rawId);
+          const info = stmt.run(validAssigneeId, now, validActorId, now, canonicalId, businessId);
           if (info.changes > 0) {
             updated += 1;
             db.prepare(`
               INSERT INTO lead_activities (id, business_id, lead_id, actor_user_id, activity_type, description_ar, description_en, metadata_json, created_at)
               VALUES (?, ?, ?, ?, 'lead_assigned', 'تم إعادة تعيين الموظف (تحديث جماعي)', 'Employee assigned (bulk update)', '{}', ?)
-            `).run(crypto.randomUUID(), businessId, leadId, req.authUser?.id || null, now);
+            `).run(crypto.randomUUID(), businessId, canonicalId, validActorId, now);
           }
         }
       } else if (action === 'mark_read' || action === 'mark_unread') {
@@ -916,10 +928,12 @@ export function createCrmRoutes(
             ? 'UPDATE leads SET is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?) WHERE id = ? AND business_id = ?'
             : 'UPDATE leads SET is_read = 0, read_at = NULL, read_by_user_id = NULL WHERE id = ? AND business_id = ?'
         );
-        for (const leadId of leadIds) {
+        for (const rawId of leadIds) {
+          const resolved = resolveLeadRecord(db, businessId, String(rawId));
+          const canonicalId = resolved?.id || String(rawId);
           const info = isReadVal
-            ? stmt.run(now, req.authUser?.id || null, leadId, businessId)
-            : stmt.run(leadId, businessId);
+            ? stmt.run(now, validActorId, canonicalId, businessId)
+            : stmt.run(canonicalId, businessId);
           if (info.changes > 0) updated += 1;
         }
       } else {
@@ -1016,23 +1030,17 @@ export function createCrmRoutes(
   // Single Lead Profile + History + Notes + Follow-ups + Activities
   router.get('/businesses/:businessId/leads/:leadId', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId, leadId } = req.params;
-    const lead = db
-      .prepare(`
-        SELECT l.*,
-               s.key as status_key, s.name_ar as status_name_ar, s.name_en as status_name_en, s.color as status_color,
-               u.full_name as assigned_employee_name, u.email as assigned_employee_email,
-               b.name as business_name
-        FROM leads l
-        LEFT JOIN lead_statuses s ON s.id = l.status_id
-        LEFT JOIN users u ON u.id = l.assigned_to_user_id
-        LEFT JOIN businesses b ON b.id = l.business_id
-        WHERE l.id = ? AND l.business_id = ?
-      `)
-      .get(leadId, businessId) as any;
+    const lead = resolveLeadRecord(db, businessId, leadId, {
+      leadCode: typeof req.query.leadCode === 'string' ? req.query.leadCode : null,
+      externalRowId: typeof req.query.externalRowId === 'string' ? req.query.externalRowId : null,
+      phone: typeof req.query.phone === 'string' ? req.query.phone : null,
+    });
 
     if (!lead) {
       return res.status(404).json({ error: 'Lead not found' });
     }
+
+    const canonicalLeadId = lead.id;
 
     if (req.membership?.role === 'employee' && lead.assigned_to_user_id !== req.authUser!.id) {
       return res.status(403).json({ error: 'Forbidden: You can only access leads assigned to you' });
@@ -1041,17 +1049,18 @@ export function createCrmRoutes(
     // Opening the lead profile automatically marks an unread lead as read (green)
     if (!lead.is_read) {
       const readNow = new Date().toISOString();
+      const validReaderId = resolveValidUserId(db, req.authUser?.id);
       db.prepare(`
         UPDATE leads
         SET is_read = 1,
             read_at = COALESCE(read_at, ?),
             read_by_user_id = COALESCE(read_by_user_id, ?)
         WHERE id = ? AND business_id = ?
-      `).run(readNow, req.authUser?.id || null, leadId, businessId);
+      `).run(readNow, validReaderId, canonicalLeadId, businessId);
       lead.is_read = 1;
       lead.read_at = lead.read_at || readNow;
-      lead.read_by_user_id = lead.read_by_user_id || req.authUser?.id || null;
-      broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId, isRead: true });
+      lead.read_by_user_id = lead.read_by_user_id || validReaderId;
+      broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId: canonicalLeadId, isRead: true });
     }
 
     const statusHistory = db
@@ -1064,7 +1073,7 @@ export function createCrmRoutes(
         WHERE h.lead_id = ? AND h.business_id = ?
         ORDER BY h.created_at DESC
       `)
-      .all(leadId, businessId);
+      .all(canonicalLeadId, businessId);
 
     const notes = db
       .prepare(`
@@ -1074,7 +1083,7 @@ export function createCrmRoutes(
         WHERE n.lead_id = ? AND n.business_id = ?
         ORDER BY n.created_at DESC
       `)
-      .all(leadId, businessId);
+      .all(canonicalLeadId, businessId);
 
     const activities = db
       .prepare(`
@@ -1084,7 +1093,7 @@ export function createCrmRoutes(
         WHERE a.lead_id = ? AND a.business_id = ?
         ORDER BY a.created_at DESC
       `)
-      .all(leadId, businessId);
+      .all(canonicalLeadId, businessId);
 
     const followUps = db
       .prepare(`
@@ -1094,9 +1103,9 @@ export function createCrmRoutes(
         WHERE f.lead_id = ? AND f.business_id = ?
         ORDER BY f.due_at ASC
       `)
-      .all(leadId, businessId);
+      .all(canonicalLeadId, businessId);
 
-    const duplicates = findDuplicateLeads(db, businessId, lead.phone_e164, lead.email, lead.id);
+    const duplicates = findDuplicateLeads(db, businessId, lead.phone_e164, lead.email, canonicalLeadId);
 
     res.json({ lead, statusHistory, notes, activities, followUps, duplicates });
   });
@@ -1104,8 +1113,14 @@ export function createCrmRoutes(
   // Explicit Mark Lead Read / Unread (used by Quick Peek & toggles)
   router.post('/businesses/:businessId/leads/:leadId/read', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId, leadId } = req.params;
-    const existing = db.prepare('SELECT id, assigned_to_user_id, is_read FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId) as any;
+    const existing = resolveLeadRecord(db, businessId, leadId, {
+      leadCode: req.body?.leadCode,
+      externalRowId: req.body?.externalRowId,
+      phone: req.body?.phone,
+    });
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
+
+    const canonicalLeadId = existing.id;
 
     if (req.membership?.role === 'employee' && existing.assigned_to_user_id !== req.authUser!.id) {
       return res.status(403).json({ error: 'Forbidden' });
@@ -1113,6 +1128,7 @@ export function createCrmRoutes(
 
     const wantRead = req.body?.isRead !== false;
     const now = new Date().toISOString();
+    const validReaderId = resolveValidUserId(db, req.authUser?.id);
     if (wantRead) {
       db.prepare(`
         UPDATE leads
@@ -1120,24 +1136,30 @@ export function createCrmRoutes(
             read_at = COALESCE(read_at, ?),
             read_by_user_id = COALESCE(read_by_user_id, ?)
         WHERE id = ? AND business_id = ?
-      `).run(now, req.authUser?.id || null, leadId, businessId);
+      `).run(now, validReaderId, canonicalLeadId, businessId);
     } else {
       db.prepare('UPDATE leads SET is_read = 0, read_at = NULL, read_by_user_id = NULL WHERE id = ? AND business_id = ?').run(
-        leadId,
+        canonicalLeadId,
         businessId
       );
     }
 
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId);
-    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId, isRead: wantRead });
+    const updated = resolveLeadRecord(db, businessId, canonicalLeadId);
+    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId: canonicalLeadId, isRead: wantRead });
     res.json({ lead: updated });
   });
 
   // Update Lead info (never overwrites original_answers_json)
   router.patch('/businesses/:businessId/leads/:leadId', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId, leadId } = req.params;
-    const existing = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId) as any;
+    const existing = resolveLeadRecord(db, businessId, leadId, {
+      leadCode: req.body?.leadCode,
+      externalRowId: req.body?.externalRowId,
+      phone: req.body?.phone,
+    });
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
+
+    const canonicalLeadId = existing.id;
 
     if (req.membership?.role === 'employee' && existing.assigned_to_user_id !== req.authUser!.id) {
       return res.status(403).json({ error: 'Forbidden' });
@@ -1146,6 +1168,7 @@ export function createCrmRoutes(
     const { fullName, phone, email, interestedService, customValues, notesSummary } = req.body || {};
     const biz = db.prepare('SELECT default_country_code FROM businesses WHERE id = ?').get(businessId) as { default_country_code: string };
     const now = new Date().toISOString();
+    const validActorId = resolveValidUserId(db, req.authUser?.id);
     const phoneE164 = phone !== undefined ? normalizePhoneE164(phone, biz.default_country_code) : existing.phone_e164;
 
     db.prepare(`
@@ -1171,18 +1194,18 @@ export function createCrmRoutes(
       customValues ? JSON.stringify(customValues) : null,
       notesSummary ?? null,
       now,
-      req.authUser?.id || null,
+      validActorId,
       now,
-      leadId,
+      canonicalLeadId,
       businessId
     );
 
     db.prepare(`
       INSERT INTO lead_activities (id, business_id, lead_id, actor_user_id, activity_type, description_ar, description_en, metadata_json, created_at)
       VALUES (?, ?, ?, ?, 'lead_updated', 'تم تحديث بيانات العميل', 'Lead details updated', '{}', ?)
-    `).run(crypto.randomUUID(), businessId, leadId, req.authUser?.id || null, now);
+    `).run(crypto.randomUUID(), businessId, canonicalLeadId, validActorId, now);
 
-    const updated = db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) as any;
+    const updated = resolveLeadRecord(db, businessId, canonicalLeadId);
     createAndBroadcastNotification(db, {
       businessId,
       userId: updated?.assigned_to_user_id || null,
@@ -1191,18 +1214,23 @@ export function createCrmRoutes(
       titleEn: `Lead Updated: ${updated?.full_name || existing.full_name}`,
       messageAr: `تم تعديل ملف العميل (${existing.lead_code})`,
       messageEn: `Updated customer profile (${existing.lead_code})`,
-      linkPath: `/leads/${leadId}`,
-      leadId,
+      linkPath: `/leads/${canonicalLeadId}`,
+      leadId: canonicalLeadId,
       createdAt: now,
     });
-    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId });
+    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId: canonicalLeadId });
     res.json({ lead: updated });
   });
 
   // Change Lead Status
   router.post('/businesses/:businessId/leads/:leadId/status', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId, leadId } = req.params;
-    const existing = db.prepare('SELECT assigned_to_user_id FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId) as any;
+    const hints = {
+      leadCode: req.body?.leadCode,
+      externalRowId: req.body?.externalRowId,
+      phone: req.body?.phone,
+    };
+    const existing = resolveLeadRecord(db, businessId, leadId, hints);
     if (!existing) return res.status(404).json({ error: 'Lead not found' });
 
     if (req.membership?.role === 'employee' && existing.assigned_to_user_id !== req.authUser!.id) {
@@ -1214,12 +1242,13 @@ export function createCrmRoutes(
 
     const lead = changeLeadStatus(db, {
       businessId,
-      leadId,
+      leadId: existing.id,
       toStatusId: statusId,
       actorUserId: req.authUser?.id,
       note,
+      hints,
     });
-    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId });
+    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId: existing.id });
     res.json({ lead });
   });
 
@@ -1231,23 +1260,30 @@ export function createCrmRoutes(
     (req: AuthRequest, res) => {
       const { businessId, leadId } = req.params;
       const { assignedToUserId } = req.body || {};
-      const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId) as any;
+      const lead = resolveLeadRecord(db, businessId, leadId, {
+        leadCode: req.body?.leadCode,
+        externalRowId: req.body?.externalRowId,
+        phone: req.body?.phone,
+      });
       if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
+      const canonicalLeadId = lead.id;
+      const validActorId = resolveValidUserId(db, req.authUser?.id);
+      const validAssigneeId = resolveValidUserId(db, assignedToUserId);
       const now = new Date().toISOString();
       db.prepare(
         'UPDATE leads SET assigned_to_user_id = ?, is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?), updated_at = ? WHERE id = ? AND business_id = ?'
       ).run(
-        assignedToUserId || null,
+        validAssigneeId,
         now,
-        req.authUser?.id || null,
+        validActorId,
         now,
-        leadId,
+        canonicalLeadId,
         businessId
       );
 
-      const emp = assignedToUserId
-        ? (db.prepare('SELECT full_name FROM users WHERE id = ?').get(assignedToUserId) as { full_name: string } | undefined)
+      const emp = validAssigneeId
+        ? (db.prepare('SELECT full_name FROM users WHERE id = ?').get(validAssigneeId) as { full_name: string } | undefined)
         : undefined;
 
       db.prepare(`
@@ -1256,31 +1292,31 @@ export function createCrmRoutes(
       `).run(
         crypto.randomUUID(),
         businessId,
-        leadId,
-        req.authUser?.id || null,
+        canonicalLeadId,
+        validActorId,
         emp ? `تم تعيين العميل إلى ${emp.full_name}` : 'تم إلغاء تعيين الموظف',
         emp ? `Lead assigned to ${emp.full_name}` : 'Lead unassigned',
-        JSON.stringify({ assignedToUserId }),
+        JSON.stringify({ assignedToUserId: validAssigneeId }),
         now
       );
 
-      if (assignedToUserId) {
+      if (validAssigneeId) {
         createAndBroadcastNotification(db, {
           businessId,
-          userId: assignedToUserId,
+          userId: validAssigneeId,
           type: 'lead_assigned',
           titleAr: `تم تعيين عميل لك: ${lead.full_name}`,
           titleEn: `Lead Assigned: ${lead.full_name}`,
           messageAr: `تم إسناد العميل ${lead.full_name} (${lead.lead_code}) إلى ${emp?.full_name || 'موظف'}`,
           messageEn: `${lead.full_name} (${lead.lead_code}) assigned to ${emp?.full_name || 'team member'}`,
-          linkPath: `/leads/${leadId}`,
-          leadId,
+          linkPath: `/leads/${canonicalLeadId}`,
+          leadId: canonicalLeadId,
           createdAt: now,
         });
       }
 
-      broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId });
-      res.json({ lead: db.prepare('SELECT * FROM leads WHERE id = ?').get(leadId) });
+      broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId: canonicalLeadId });
+      res.json({ lead: resolveLeadRecord(db, businessId, canonicalLeadId) });
     }
   );
 
@@ -1290,19 +1326,25 @@ export function createCrmRoutes(
     const { content } = req.body || {};
     if (!content || !content.trim()) return res.status(400).json({ error: 'Note content is required' });
 
-    const lead = db.prepare('SELECT id, full_name, lead_code, assigned_to_user_id FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId) as any;
+    const lead = resolveLeadRecord(db, businessId, leadId, {
+      leadCode: req.body?.leadCode,
+      externalRowId: req.body?.externalRowId,
+      phone: req.body?.phone,
+    });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     if (req.membership?.role === 'employee' && lead.assigned_to_user_id !== req.authUser!.id) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
+    const canonicalLeadId = lead.id;
+    const validActorId = resolveValidUserId(db, req.authUser?.id);
     const now = new Date().toISOString();
     const noteId = crypto.randomUUID();
     db.prepare('INSERT INTO lead_notes (id, business_id, lead_id, author_user_id, content, created_at) VALUES (?, ?, ?, ?, ?, ?)').run(
       noteId,
       businessId,
-      leadId,
-      req.authUser?.id || null,
+      canonicalLeadId,
+      validActorId,
       content.trim(),
       now
     );
@@ -1313,15 +1355,15 @@ export function createCrmRoutes(
       content.trim().slice(0, 240),
       now,
       now,
-      req.authUser?.id || null,
+      validActorId,
       now,
-      leadId
+      canonicalLeadId
     );
 
     db.prepare(`
       INSERT INTO lead_activities (id, business_id, lead_id, actor_user_id, activity_type, description_ar, description_en, metadata_json, created_at)
       VALUES (?, ?, ?, ?, 'note_added', 'تمت إضافة ملاحظة جديدة', 'Internal note added', '{}', ?)
-    `).run(crypto.randomUUID(), businessId, leadId, req.authUser?.id || null, now);
+    `).run(crypto.randomUUID(), businessId, canonicalLeadId, validActorId, now);
 
     createAndBroadcastNotification(db, {
       businessId,
@@ -1331,11 +1373,11 @@ export function createCrmRoutes(
       titleEn: `New Note: ${lead.full_name}`,
       messageAr: `${lead.lead_code}: ${content.trim().slice(0, 80)}`,
       messageEn: `${lead.lead_code}: ${content.trim().slice(0, 80)}`,
-      linkPath: `/leads/${leadId}`,
-      leadId,
+      linkPath: `/leads/${canonicalLeadId}`,
+      leadId: canonicalLeadId,
       createdAt: now,
     });
-    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId });
+    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId: canonicalLeadId });
 
     res.status(201).json({ note: db.prepare('SELECT * FROM lead_notes WHERE id = ?').get(noteId) });
   });
@@ -1385,21 +1427,28 @@ export function createCrmRoutes(
       return res.status(400).json({ error: 'leadId, title, and dueAt are required' });
     }
 
-    const lead = db.prepare('SELECT * FROM leads WHERE id = ? AND business_id = ?').get(leadId, businessId) as any;
+    const lead = resolveLeadRecord(db, businessId, leadId, {
+      leadCode: req.body?.leadCode,
+      externalRowId: req.body?.externalRowId,
+      phone: req.body?.phone,
+    });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
+    const canonicalLeadId = lead.id;
+    const validActorId = resolveValidUserId(db, req.authUser?.id);
     const now = new Date().toISOString();
     const id = crypto.randomUUID();
-    const assignee = req.membership?.role === 'employee' ? req.authUser!.id : assignedToUserId || lead.assigned_to_user_id || req.authUser!.id;
+    const rawAssignee = req.membership?.role === 'employee' ? req.authUser!.id : assignedToUserId || lead.assigned_to_user_id || req.authUser!.id;
+    const assignee = resolveValidUserId(db, rawAssignee);
 
     db.prepare(`
       INSERT INTO follow_up_tasks (id, business_id, lead_id, assigned_to_user_id, created_by_user_id, title, notes, due_at, status, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-    `).run(id, businessId, leadId, assignee, req.authUser!.id, title.trim(), notes?.trim() || null, dueAt, now);
+    `).run(id, businessId, canonicalLeadId, assignee, validActorId, title.trim(), notes?.trim() || null, dueAt, now);
 
     db.prepare(
       'UPDATE leads SET next_follow_up_at = ?, is_read = 1, read_at = COALESCE(read_at, ?), read_by_user_id = COALESCE(read_by_user_id, ?), updated_at = ? WHERE id = ?'
-    ).run(dueAt, now, req.authUser?.id || null, now, leadId);
+    ).run(dueAt, now, validActorId, now, canonicalLeadId);
 
     db.prepare(`
       INSERT INTO lead_activities (id, business_id, lead_id, actor_user_id, activity_type, description_ar, description_en, metadata_json, created_at)
@@ -1407,8 +1456,8 @@ export function createCrmRoutes(
     `).run(
       crypto.randomUUID(),
       businessId,
-      leadId,
-      req.authUser!.id,
+      canonicalLeadId,
+      validActorId,
       `تمت جدولة متابعة: ${title.trim()}`,
       `Scheduled follow-up: ${title.trim()}`,
       JSON.stringify({ dueAt }),
@@ -1423,11 +1472,11 @@ export function createCrmRoutes(
       titleEn: `Follow-up Scheduled: ${lead.full_name}`,
       messageAr: `${title.trim()} (${lead.lead_code})`,
       messageEn: `${title.trim()} (${lead.lead_code})`,
-      linkPath: `/leads/${leadId}`,
-      leadId,
+      linkPath: `/leads/${canonicalLeadId}`,
+      leadId: canonicalLeadId,
       createdAt: now,
     });
-    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId });
+    broadcastWorkspaceEvent(businessId, 'lead_updated', { businessId, leadId: canonicalLeadId });
 
     res.status(201).json({ followUp: db.prepare('SELECT * FROM follow_up_tasks WHERE id = ?').get(id) });
   });

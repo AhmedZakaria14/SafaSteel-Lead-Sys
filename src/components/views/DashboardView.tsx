@@ -14,7 +14,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { Users, UserPlus, CheckCircle2, TrendingUp, AlertCircle, Plus, ArrowUpRight } from 'lucide-react';
-import { AnalyticsResponse, Language } from '../../types/crm';
+import { AnalyticsResponse, Language, Lead } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { GlobalLeadSearch } from '../ui/GlobalLeadSearch';
 
@@ -23,7 +23,7 @@ interface DashboardViewProps {
   businessId: string;
   analytics: AnalyticsResponse | null;
   loading: boolean;
-  onSelectLead: (leadId: string) => void;
+  onSelectLead: (leadId: string, lead?: Lead) => void;
   onNavigateLeads: () => void;
   onNavigateFollowUps: () => void;
   onAddLead: () => void;

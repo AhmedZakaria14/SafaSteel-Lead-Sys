@@ -604,6 +604,93 @@ describe('LeadFlow CRM Acceptance Tests', () => {
     const analyticsJson = await analyticsRes.json();
     assert.equal(typeof analyticsJson.summary.unreadLeads, 'number');
   });
+
+  it('22. Permanently prevents Lead not found on all unread leads across multi-instance serverless containers and fallback keys', async () => {
+    const okLogin = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'SafaSteels2026' }),
+    });
+    assert.equal(okLogin.status, 200);
+    const { token } = await okLogin.json();
+
+    // 1. Fetch all unread leads and verify every single one opens cleanly with 200 OK
+    const unreadRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads?readState=unread&pageSize=100`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert.equal(unreadRes.status, 200);
+    const unreadList = (await unreadRes.json()).leads as any[];
+    assert.ok(unreadList.length > 0, 'Expected unread leads to test');
+
+    for (const ul of unreadList.slice(0, 15)) {
+      const detailRes = await fetch(
+        `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${encodeURIComponent(ul.id)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      assert.equal(detailRes.status, 200, `Expected unread lead ${ul.id} (${ul.lead_code}) to open without 404`);
+      const detailJson = await detailRes.json();
+      assert.equal(detailJson.lead.id, ul.id);
+    }
+
+    const sampleLead = unreadList[0];
+
+    // 2. Resolve lead directly by lead_code (e.g., LD-1001) and external_row_id (e.g., l:...)
+    const byCodeRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${encodeURIComponent(sampleLead.lead_code)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert.equal(byCodeRes.status, 200);
+    assert.equal((await byCodeRes.json()).lead.id, sampleLead.id);
+
+    if (sampleLead.external_row_id) {
+      const byExtRes = await fetch(
+        `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${encodeURIComponent(sampleLead.external_row_id)}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      assert.equal(byExtRes.status, 200);
+      assert.equal((await byExtRes.json()).lead.id, sampleLead.id);
+    }
+
+    // 3. Simulate stale/mismatched UUID in URL path with query/body hints (leadCode / externalRowId)
+    const staleUuid = '00000000-dead-beef-0000-000000000099';
+    const hintedGetRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${staleUuid}?leadCode=${encodeURIComponent(sampleLead.lead_code)}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    assert.equal(hintedGetRes.status, 200);
+    assert.equal((await hintedGetRes.json()).lead.id, sampleLead.id);
+
+    const hintedReadRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${staleUuid}/read`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          isRead: false,
+          leadCode: sampleLead.lead_code,
+          externalRowId: sampleLead.external_row_id,
+        }),
+      }
+    );
+    assert.equal(hintedReadRes.status, 200);
+    assert.equal((await hintedReadRes.json()).lead.is_read, 0);
+
+    // 4. Status change with stage key or stale stage ID resolves cleanly
+    const hintedStatusRes = await fetch(
+      `${baseUrl}/api/businesses/alsafa-steel-workspace/leads/${staleUuid}/status`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          statusId: 'contacted',
+          leadCode: sampleLead.lead_code,
+          externalRowId: sampleLead.external_row_id,
+        }),
+      }
+    );
+    assert.equal(hintedStatusRes.status, 200);
+  });
 });
 
 

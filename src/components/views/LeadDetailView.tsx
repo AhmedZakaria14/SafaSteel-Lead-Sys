@@ -32,6 +32,7 @@ interface LeadDetailViewProps {
   lang: Language;
   businessId: string;
   leadId: string;
+  initialLead?: Lead | null;
   userRole: Role;
   stages: PipelineStage[];
   customFields: CustomField[];
@@ -86,6 +87,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   lang,
   businessId,
   leadId,
+  initialLead,
   userRole,
   stages,
   customFields,
@@ -97,8 +99,16 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const t = getT(lang);
   const isAr = lang === 'ar';
 
-  const [loading, setLoading] = useState(true);
-  const [lead, setLead] = useState<Lead | null>(null);
+  const [loading, setLoading] = useState(!initialLead);
+  const [lead, setLead] = useState<Lead | null>(() =>
+    initialLead
+      ? {
+          ...initialLead,
+          is_read: 1,
+          read_at: initialLead.read_at || new Date().toISOString(),
+        }
+      : null
+  );
   const [notes, setNotes] = useState<any[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [followUps, setFollowUps] = useState<FollowUpTask[]>([]);
@@ -113,10 +123,30 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const [togglingRead, setTogglingRead] = useState(false);
   const notifiedReadLeadRef = React.useRef<string | null>(null);
 
+  const buildHintsPayload = (sourceLead?: Lead | null) => {
+    const ref = sourceLead || lead || initialLead;
+    return {
+      leadCode: ref?.lead_code || undefined,
+      externalRowId: ref?.external_row_id || undefined,
+      phone: ref?.phone_e164 || ref?.phone || undefined,
+    };
+  };
+
   const loadDetail = async () => {
-    setLoading(true);
+    const hintRef = lead || initialLead;
+    if (!hintRef) {
+      setLoading(true);
+    }
     try {
-      const res = await apiRequest<any>(`/businesses/${businessId}/leads/${leadId}`);
+      const qs = new URLSearchParams();
+      if (hintRef?.lead_code) qs.set('leadCode', hintRef.lead_code);
+      if (hintRef?.external_row_id) qs.set('externalRowId', hintRef.external_row_id);
+      if (hintRef?.phone_e164 || hintRef?.phone) qs.set('phone', hintRef.phone_e164 || hintRef.phone || '');
+      const querySuffix = qs.toString() ? `?${qs.toString()}` : '';
+
+      const res = await apiRequest<any>(
+        `/businesses/${businessId}/leads/${encodeURIComponent(leadId)}${querySuffix}`
+      );
       setLead(res.lead);
       setNotes(res.notes || []);
       setActivities(res.activities || []);
@@ -127,25 +157,48 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
         onUpdated();
       }
     } catch (err: any) {
-      onNotify(err.message, 'error');
+      if (!lead && !initialLead) {
+        onNotify(
+          isAr ? 'تعذر العثور على هذا العميل، تمت إعادتك لقائمة العملاء' : 'Lead not found, returning to leads list',
+          'info'
+        );
+        onBack();
+      } else {
+        onNotify(err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (initialLead) {
+      setLead({
+        ...initialLead,
+        is_read: 1,
+        read_at: initialLead.read_at || new Date().toISOString(),
+      });
+      setLoading(false);
+    }
     loadDetail();
   }, [businessId, leadId]);
 
   const handleToggleRead = async () => {
     if (!lead || togglingRead) return;
     const nextIsRead = !lead.is_read;
+    const targetId = lead.id || leadId;
     setTogglingRead(true);
     try {
-      const res = await apiRequest<{ lead: Lead }>(`/businesses/${businessId}/leads/${lead.id}/read`, {
-        method: 'POST',
-        body: JSON.stringify({ isRead: nextIsRead }),
-      });
+      const res = await apiRequest<{ lead: Lead }>(
+        `/businesses/${businessId}/leads/${encodeURIComponent(targetId)}/read`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            isRead: nextIsRead,
+            ...buildHintsPayload(lead),
+          }),
+        }
+      );
       setLead((prev) => (prev ? { ...prev, ...res.lead, is_read: nextIsRead ? 1 : 0 } : prev));
       onUpdated();
       onNotify(
@@ -177,11 +230,15 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
 
   const handleStatusChange = async (statusId: string) => {
     if (!statusId || statusId === lead?.status_id) return;
+    const targetId = lead?.id || leadId;
     setUpdatingStageId(statusId);
     try {
-      await apiRequest(`/businesses/${businessId}/leads/${leadId}/status`, {
+      await apiRequest(`/businesses/${businessId}/leads/${encodeURIComponent(targetId)}/status`, {
         method: 'POST',
-        body: JSON.stringify({ statusId }),
+        body: JSON.stringify({
+          statusId,
+          ...buildHintsPayload(lead),
+        }),
       });
       onNotify(isAr ? 'تم تحديث حالة العميل' : 'Lead status updated', 'success');
       await loadDetail();
@@ -194,10 +251,14 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   };
 
   const handleAssign = async (assignedToUserId: string) => {
+    const targetId = lead?.id || leadId;
     try {
-      await apiRequest(`/businesses/${businessId}/leads/${leadId}/assign`, {
+      await apiRequest(`/businesses/${businessId}/leads/${encodeURIComponent(targetId)}/assign`, {
         method: 'POST',
-        body: JSON.stringify({ assignedToUserId: assignedToUserId || null }),
+        body: JSON.stringify({
+          assignedToUserId: assignedToUserId || null,
+          ...buildHintsPayload(lead),
+        }),
       });
       onNotify(isAr ? 'تم تحديث المسؤول عن العميل' : 'Assignee updated', 'success');
       await loadDetail();
@@ -210,10 +271,14 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newNote.trim()) return;
+    const targetId = lead?.id || leadId;
     try {
-      await apiRequest(`/businesses/${businessId}/leads/${leadId}/notes`, {
+      await apiRequest(`/businesses/${businessId}/leads/${encodeURIComponent(targetId)}/notes`, {
         method: 'POST',
-        body: JSON.stringify({ content: newNote.trim() }),
+        body: JSON.stringify({
+          content: newNote.trim(),
+          ...buildHintsPayload(lead),
+        }),
       });
       setNewNote('');
       onNotify(isAr ? 'تمت إضافة الملاحظة' : 'Note added', 'success');
@@ -227,13 +292,15 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
   const handleScheduleFollowUp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!followUpTitle.trim() || !followUpDue) return;
+    const targetId = lead?.id || leadId;
     try {
       await apiRequest(`/businesses/${businessId}/follow-ups`, {
         method: 'POST',
         body: JSON.stringify({
-          leadId,
+          leadId: targetId,
           title: followUpTitle.trim(),
           dueAt: new Date(followUpDue).toISOString(),
+          ...buildHintsPayload(lead),
         }),
       });
       setFollowUpTitle('');
@@ -259,7 +326,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
     }
   };
 
-  if (loading || !lead) {
+  if (loading && !lead) {
     return (
       <div className="space-y-5 animate-pulse">
         <div className="h-32 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800" />
@@ -269,6 +336,10 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
         </div>
       </div>
     );
+  }
+
+  if (!lead) {
+    return null;
   }
 
   const originalAnswers = JSON.parse(lead.original_answers_json || '{}');

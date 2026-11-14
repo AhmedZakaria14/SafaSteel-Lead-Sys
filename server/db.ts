@@ -518,6 +518,100 @@ function initSchema(db: SqlDb) {
       }
     }
   }
+
+  normalizeDeterministicIds(db);
+}
+
+export function deterministicStageId(businessId: string, stageKey: string): string {
+  const hash = crypto
+    .createHash('sha1')
+    .update(`alsafa-stage-v1:${businessId}:${String(stageKey || '').trim().toLowerCase()}`)
+    .digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+export function deterministicSheetLeadId(businessId: string, externalRowId: string): string {
+  const hash = crypto
+    .createHash('sha1')
+    .update(`alsafa-sheet-lead-v1:${businessId}:${String(externalRowId || '').trim()}`)
+    .digest('hex');
+  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+}
+
+export function normalizeDeterministicIds(db: SqlDb) {
+  const defaultKeys = new Set(DEFAULT_PIPELINE_STAGES.map((s) => s.key));
+  const stages = db
+    .prepare('SELECT id, business_id, key FROM lead_statuses')
+    .all() as Array<{ id: string; business_id: string; key: string }>;
+
+  const stagesToMigrate = stages.filter(
+    (s) => defaultKeys.has(s.key) && s.id !== deterministicStageId(s.business_id, s.key)
+  );
+
+  const sheetLeads = db
+    .prepare("SELECT id, business_id, external_row_id, custom_values_json FROM leads WHERE external_row_id IS NOT NULL AND external_row_id != ''")
+    .all() as Array<{ id: string; business_id: string; external_row_id: string; custom_values_json: string | null }>;
+
+  const leadsToMigrate = sheetLeads.filter(
+    (l) => l.id !== deterministicSheetLeadId(l.business_id, l.external_row_id)
+  );
+
+  if (stagesToMigrate.length === 0 && leadsToMigrate.length === 0) return;
+
+  db.exec('PRAGMA foreign_keys = OFF;');
+  db.exec('BEGIN');
+  try {
+    const updateStageStmt = db.prepare('UPDATE lead_statuses SET id = ? WHERE id = ?');
+    const updateLeadStatusStmt = db.prepare('UPDATE leads SET status_id = ? WHERE status_id = ? AND business_id = ?');
+    const updateHistFromStmt = db.prepare('UPDATE lead_status_history SET from_status_id = ? WHERE from_status_id = ? AND business_id = ?');
+    const updateHistToStmt = db.prepare('UPDATE lead_status_history SET to_status_id = ? WHERE to_status_id = ? AND business_id = ?');
+
+    for (const st of stagesToMigrate) {
+      const targetStageId = deterministicStageId(st.business_id, st.key);
+      const conflict = db.prepare('SELECT 1 FROM lead_statuses WHERE id = ?').get(targetStageId);
+      if (conflict) continue;
+      updateStageStmt.run(targetStageId, st.id);
+      updateLeadStatusStmt.run(targetStageId, st.id, st.business_id);
+      updateHistFromStmt.run(targetStageId, st.id, st.business_id);
+      updateHistToStmt.run(targetStageId, st.id, st.business_id);
+    }
+
+    const updateLeadIdStmt = db.prepare('UPDATE leads SET id = ?, custom_values_json = ? WHERE id = ?');
+    const updateHistLeadStmt = db.prepare('UPDATE lead_status_history SET lead_id = ? WHERE lead_id = ?');
+    const updateNotesLeadStmt = db.prepare('UPDATE lead_notes SET lead_id = ? WHERE lead_id = ?');
+    const updateActLeadStmt = db.prepare('UPDATE lead_activities SET lead_id = ? WHERE lead_id = ?');
+    const updateTaskLeadStmt = db.prepare('UPDATE follow_up_tasks SET lead_id = ? WHERE lead_id = ?');
+    const updateNotifLinkStmt = db.prepare('UPDATE notifications SET link_path = ? WHERE link_path = ?');
+
+    for (const l of leadsToMigrate) {
+      const targetLeadId = deterministicSheetLeadId(l.business_id, l.external_row_id);
+      const conflict = db.prepare('SELECT 1 FROM leads WHERE id = ?').get(targetLeadId);
+      if (conflict) continue;
+
+      let customObj: Record<string, any> = {};
+      try {
+        customObj = JSON.parse(l.custom_values_json || '{}');
+      } catch {
+        customObj = {};
+      }
+      if (!customObj._legacy_id) {
+        customObj._legacy_id = l.id;
+      }
+
+      updateLeadIdStmt.run(targetLeadId, JSON.stringify(customObj), l.id);
+      updateHistLeadStmt.run(targetLeadId, l.id);
+      updateNotesLeadStmt.run(targetLeadId, l.id);
+      updateActLeadStmt.run(targetLeadId, l.id);
+      updateTaskLeadStmt.run(targetLeadId, l.id);
+      updateNotifLinkStmt.run(`/leads/${targetLeadId}`, `/leads/${l.id}`);
+    }
+
+    db.exec('COMMIT');
+  } catch {
+    db.exec('ROLLBACK');
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON;');
+  }
 }
 
 export const DEFAULT_PIPELINE_STAGES = [
@@ -536,11 +630,12 @@ export function createDefaultStagesForBusiness(db: SqlDb, businessId: string) {
   const stmt = db.prepare(`
     INSERT INTO lead_statuses (id, business_id, key, name_ar, name_en, color, sort_order, is_default, is_converted, is_lost, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(business_id, key) DO NOTHING
   `);
 
   for (const s of DEFAULT_PIPELINE_STAGES) {
     stmt.run(
-      crypto.randomUUID(),
+      deterministicStageId(businessId, s.key),
       businessId,
       s.key,
       s.name_ar,
