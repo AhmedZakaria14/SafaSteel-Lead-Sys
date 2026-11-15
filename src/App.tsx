@@ -1030,33 +1030,44 @@ function LeadFlowAppInner() {
     <div className="min-h-screen flex bg-slate-50 dark:bg-[#090E1A] text-slate-900 dark:text-slate-100">
       {/* Desktop Collapsible Sidebar */}
       <aside
-        className={`hidden md:flex flex-col border-e border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all duration-200 shrink-0 ${
-          sidebarCollapsed ? 'w-16' : 'w-64'
+        className={`hidden md:flex flex-col sticky top-0 h-screen border-e border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 transition-all duration-200 shrink-0 z-20 ${
+          sidebarCollapsed ? 'w-[72px]' : 'w-64'
         }`}
       >
-        <div className="h-16 px-3.5 flex items-center justify-between border-b border-slate-200 dark:border-slate-800 gap-2">
-          {!sidebarCollapsed ? (
-            <img
-              src="/alsafa-logo.png"
-              alt="Al-Safa Steel"
-              className="h-11 w-auto max-w-[168px] object-contain select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
-            />
-          ) : (
-            <img
-              src="/favicon.png"
-              alt="Al-Safa Steel"
-              className="h-8 w-8 object-contain mx-auto select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
-            />
+        <div
+          className={`h-16 flex items-center border-b border-slate-200 dark:border-slate-800 shrink-0 ${
+            sidebarCollapsed ? 'justify-center px-2' : 'justify-between px-3.5 gap-2'
+          }`}
+        >
+          {!sidebarCollapsed && (
+            <div className="min-w-0 flex-1 flex items-center overflow-hidden">
+              <img
+                src="/alsafa-logo.png"
+                alt="Al-Safa Steel"
+                className="h-10 w-auto max-w-[164px] object-contain select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+              />
+            </div>
           )}
           <button
             type="button"
             onClick={() => setSidebarCollapsed((c) => !c)}
-            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 shrink-0"
-            aria-label="Toggle sidebar"
+            className="h-9 w-9 shrink-0 inline-flex items-center justify-center rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/90 dark:bg-slate-800/70 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white active:scale-[0.97] transition-all"
+            aria-label={sidebarCollapsed ? (isAr ? 'توسيع القائمة الجانبية' : 'Expand sidebar') : isAr ? 'تصغير القائمة الجانبية' : 'Collapse sidebar'}
+            title={sidebarCollapsed ? (isAr ? 'توسيع القائمة الجانبية' : 'Expand sidebar') : isAr ? 'تصغير القائمة الجانبية' : 'Collapse sidebar'}
           >
-            <Menu className="h-4 w-4" />
+            <Menu className="h-4.5 w-4.5" />
           </button>
         </div>
+
+        {sidebarCollapsed && (
+          <div className="py-2.5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-center shrink-0">
+            <img
+              src="/favicon.png"
+              alt="Al-Safa Steel"
+              className="h-8 w-8 object-contain select-none dark:drop-shadow-[0_0_2px_rgba(255,255,255,0.8)]"
+            />
+          </div>
+        )}
 
         {/* Workspace Switcher */}
         {!sidebarCollapsed && (

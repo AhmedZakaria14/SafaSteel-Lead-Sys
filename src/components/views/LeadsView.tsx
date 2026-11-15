@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Search,
@@ -136,6 +136,13 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [markingAllRead, setMarkingAllRead] = useState(false);
   const [peekLead, setPeekLead] = useState<Lead | null>(null);
 
+  const topScrollRef = useRef<HTMLDivElement | null>(null);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const tableRef = useRef<HTMLTableElement | null>(null);
+  const isSyncingScrollRef = useRef(false);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
+
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
     lead_code: true,
     full_name: true,
@@ -230,6 +237,59 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     sortDir,
     refreshTrigger,
   ]);
+
+  const measureTableScroll = useCallback(() => {
+    const tableWrap = tableScrollRef.current;
+    const tableEl = tableRef.current;
+    if (!tableWrap || !tableEl) {
+      setHasHorizontalOverflow(false);
+      return;
+    }
+    const contentWidth = Math.max(tableEl.scrollWidth, tableWrap.scrollWidth);
+    const clientWidth = tableWrap.clientWidth;
+    setTableScrollWidth(contentWidth);
+    setHasHorizontalOverflow(clientWidth > 0 && contentWidth > clientWidth + 2);
+  }, []);
+
+  useEffect(() => {
+    measureTableScroll();
+    const tableWrap = tableScrollRef.current;
+    const tableEl = tableRef.current;
+    if (!tableWrap || !tableEl) return;
+
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => measureTableScroll()) : null;
+    ro?.observe(tableWrap);
+    ro?.observe(tableEl);
+    window.addEventListener('resize', measureTableScroll);
+    return () => {
+      ro?.disconnect();
+      window.removeEventListener('resize', measureTableScroll);
+    };
+  }, [measureTableScroll, leads, visibleCols, lang, loading, customFields.length]);
+
+  const handleTopScroll = () => {
+    if (isSyncingScrollRef.current) return;
+    const topEl = topScrollRef.current;
+    const bodyEl = tableScrollRef.current;
+    if (!topEl || !bodyEl) return;
+    isSyncingScrollRef.current = true;
+    bodyEl.scrollLeft = topEl.scrollLeft;
+    requestAnimationFrame(() => {
+      isSyncingScrollRef.current = false;
+    });
+  };
+
+  const handleTableScroll = () => {
+    if (isSyncingScrollRef.current) return;
+    const topEl = topScrollRef.current;
+    const bodyEl = tableScrollRef.current;
+    if (!topEl || !bodyEl) return;
+    isSyncingScrollRef.current = true;
+    topEl.scrollLeft = bodyEl.scrollLeft;
+    requestAnimationFrame(() => {
+      isSyncingScrollRef.current = false;
+    });
+  };
 
   const handleCopy = async (key: string, value: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -854,7 +914,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
       </div>
 
       {/* Mobile Cards + Desktop Table */}
-      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-x-clip">
         {loading ? (
           <div className="p-4 sm:p-6 space-y-3 animate-pulse">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -1074,9 +1134,27 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
               })}
             </div>
 
-            {/* Desktop Table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-start border-collapse">
+            {/* Top Horizontal Scrollbar (sticky at top of desktop table instead of bottom) */}
+            {hasHorizontalOverflow && (
+              <div className="hidden md:block sticky top-14 sm:top-16 z-20 border-b border-slate-200 dark:border-slate-800 bg-slate-50/95 dark:bg-slate-950/95 backdrop-blur-xs">
+                <div
+                  ref={topScrollRef}
+                  onScroll={handleTopScroll}
+                  className="overflow-x-auto overflow-y-hidden crm-top-scrollbar"
+                  aria-label={isAr ? 'شريط التمرير العرضي للجدول' : 'Horizontal table scrollbar'}
+                >
+                  <div style={{ width: `${tableScrollWidth}px`, height: '1px' }} />
+                </div>
+              </div>
+            )}
+
+            {/* Desktop Table (bottom scrollbar hidden; controlled by top bar + trackpad) */}
+            <div
+              ref={tableScrollRef}
+              onScroll={handleTableScroll}
+              className="hidden md:block overflow-x-auto no-scrollbar"
+            >
+              <table ref={tableRef} className="w-full text-start border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/70 text-[11px] uppercase tracking-wide font-semibold text-slate-500 dark:text-slate-400">
                   {canManage && (

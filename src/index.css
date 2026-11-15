@@ -57,6 +57,53 @@
   display: none;
 }
 
+/* Always-accessible, smooth top horizontal scrollbar for desktop leads table */
+.crm-top-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+
+.dark .crm-top-scrollbar {
+  scrollbar-color: #475569 transparent;
+}
+
+.crm-top-scrollbar::-webkit-scrollbar {
+  height: 11px;
+}
+
+.crm-top-scrollbar::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.crm-top-scrollbar::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.crm-top-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.dark .crm-top-scrollbar::-webkit-scrollbar-track {
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.dark .crm-top-scrollbar::-webkit-scrollbar-thumb {
+  background: #475569;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+.dark .crm-top-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
 .crm-cv-auto {
   content-visibility: auto;
   contain-intrinsic-size: auto 132px;
