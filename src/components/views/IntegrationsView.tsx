@@ -12,6 +12,7 @@ import {
 import { IntegrationRecord, Language, Role, SyncLog } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest } from '../../lib/api';
+import { formatCairoDateTime } from '../../lib/dateFormat';
 
 interface IntegrationsViewProps {
   lang: Language;
@@ -514,7 +515,7 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                   <span>
                     {isAr ? 'معالجة:' : 'Processed:'} {log.processed_count} (+{log.created_count} / {log.updated_count})
                   </span>
-                  <span>{new Date(log.started_at).toLocaleString(isAr ? 'ar-SA' : 'en-US')}</span>
+                  <span className="font-mono" dir="ltr">{formatCairoDateTime(log.started_at, lang)}</span>
                 </div>
                 {log.error_message && <p className="text-red-600 dark:text-red-400 break-words">{log.error_message}</p>}
               </div>
@@ -548,8 +549,8 @@ export const IntegrationsView: React.FC<IntegrationsViewProps> = ({
                       {log.created_count} / {log.updated_count}
                     </td>
                     <td className="py-2.5 px-4 text-slate-500 max-w-xs truncate">{log.error_message || '—'}</td>
-                    <td className="py-2.5 px-4 text-end tabular-nums text-slate-400">
-                      {new Date(log.started_at).toLocaleString(isAr ? 'ar-SA' : 'en-US')}
+                    <td className="py-2.5 px-4 text-end font-mono tabular-nums text-slate-400" dir="ltr">
+                      {formatCairoDateTime(log.started_at, lang)}
                     </td>
                   </tr>
                 ))}

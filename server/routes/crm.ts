@@ -1089,6 +1089,43 @@ export function createCrmRoutes(
     res.json({ lead, statusHistory, notes, activities, followUps, duplicates });
   });
 
+  // Mark all unread leads in workspace as read (green) in one action
+  router.post('/businesses/:businessId/leads/mark-all-read', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
+    const { businessId } = req.params;
+    const now = new Date().toISOString();
+    const validReaderId = resolveValidUserId(db, req.authUser?.id);
+    const isEmp = req.membership?.role === 'employee';
+
+    const info = isEmp
+      ? db
+          .prepare(`
+            UPDATE leads
+            SET is_read = 1,
+                read_at = COALESCE(read_at, ?),
+                read_by_user_id = COALESCE(read_by_user_id, ?)
+            WHERE business_id = ? AND assigned_to_user_id = ? AND COALESCE(is_read, 0) = 0
+          `)
+          .run(now, validReaderId, businessId, req.authUser!.id)
+      : db
+          .prepare(`
+            UPDATE leads
+            SET is_read = 1,
+                read_at = COALESCE(read_at, ?),
+                read_by_user_id = COALESCE(read_by_user_id, ?)
+            WHERE business_id = ? AND COALESCE(is_read, 0) = 0
+          `)
+          .run(now, validReaderId, businessId);
+
+    if (info.changes > 0) {
+      broadcastWorkspaceEvent(businessId, 'lead_updated', {
+        businessId,
+        markedAllRead: true,
+        updatedCount: info.changes,
+      });
+    }
+    res.json({ ok: true, updatedCount: info.changes });
+  });
+
   // Explicit Mark Lead Read / Unread (used by Quick Peek & toggles)
   router.post('/businesses/:businessId/leads/:leadId/read', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
     const { businessId, leadId } = req.params;
@@ -1860,10 +1897,25 @@ export function createCrmRoutes(
       `)
       .all(...scopeParams) as any[];
 
+    const toCairoDateStr = (val: string | number | Date): string => {
+      try {
+        const dt = val instanceof Date ? val : new Date(val);
+        if (Number.isNaN(dt.getTime())) return String(val).slice(0, 10);
+        return new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'Africa/Cairo',
+          calendar: 'gregory',
+          numberingSystem: 'latn',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(dt);
+      } catch {
+        return String(val).slice(0, 10);
+      }
+    };
+
     const now = Date.now();
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-    const todayMs = startOfToday.getTime();
+    const todayCairoStr = toCairoDateStr(now);
     const weekAgoMs = now - 7 * 86400_000;
     const monthAgoMs = now - 30 * 86400_000;
 
@@ -1885,11 +1937,22 @@ export function createCrmRoutes(
     const adMap = new Map<string, { name: string; campaign: string; total: number; converted: number }>();
     const formMap = new Map<string, { name: string; total: number; converted: number }>();
     const employeeMap = new Map<string, { name: string; total: number; contacted: number; converted: number }>();
+    const leadCairoDates = new Map<string, { total: number; converted: number }>();
+    const leadCairoMonths = new Map<string, number>();
 
     for (const l of leads) {
       if (!l.is_read) unreadLeadsCount += 1;
       const t = new Date(l.created_at).getTime();
-      if (t >= todayMs) todayCount += 1;
+      const leadDayCairo = toCairoDateStr(l.created_at);
+      const leadMonthCairo = leadDayCairo.slice(0, 7);
+
+      const dayBucket = leadCairoDates.get(leadDayCairo) || { total: 0, converted: 0 };
+      dayBucket.total += 1;
+      if (l.is_converted) dayBucket.converted += 1;
+      leadCairoDates.set(leadDayCairo, dayBucket);
+      leadCairoMonths.set(leadMonthCairo, (leadCairoMonths.get(leadMonthCairo) || 0) + 1);
+
+      if (leadDayCairo === todayCairoStr) todayCount += 1;
       if (t >= weekAgoMs) weekCount += 1;
       if (t >= monthAgoMs) monthCount += 1;
 
@@ -1950,7 +2013,7 @@ export function createCrmRoutes(
       employeeMap.set(empName, eEntry);
     }
 
-    // Daily acquisition across last 30 days ending at latest lead date or today
+    // Daily acquisition across last 30 days in Africa/Cairo timezone
     const maxLeadMs = leads.reduce((acc, l) => {
       const t = new Date(l.created_at).getTime();
       return Number.isFinite(t) && t > acc ? t : acc;
@@ -1960,12 +2023,12 @@ export function createCrmRoutes(
     const dailyTrend: Array<{ date: string; count: number; converted: number }> = [];
     for (let i = 29; i >= 0; i--) {
       const d = new Date(anchorMs - i * 86400_000);
-      const dayStr = d.toISOString().slice(0, 10);
-      const dayLeads = leads.filter((l) => l.created_at.slice(0, 10) === dayStr);
+      const dayStr = toCairoDateStr(d);
+      const dayBucket = leadCairoDates.get(dayStr);
       dailyTrend.push({
         date: dayStr.slice(5),
-        count: dayLeads.length,
-        converted: dayLeads.filter((l) => l.is_converted).length,
+        count: dayBucket?.total || 0,
+        converted: dayBucket?.converted || 0,
       });
     }
 
@@ -1981,15 +2044,15 @@ export function createCrmRoutes(
       weeklyTrend.push({ week: `W-${w === 0 ? 'Current' : w}`, count: cnt });
     }
 
-    // Monthly trend (last 6 months)
+    // Monthly trend (last 6 months in Africa/Cairo timezone)
     const monthlyTrend: Array<{ month: string; count: number }> = [];
     for (let m = 5; m >= 0; m--) {
       const d = new Date();
       d.setMonth(d.getMonth() - m);
-      const ym = d.toISOString().slice(0, 7);
+      const ym = toCairoDateStr(d).slice(0, 7);
       monthlyTrend.push({
         month: ym,
-        count: leads.filter((l) => l.created_at.startsWith(ym)).length,
+        count: leadCairoMonths.get(ym) || 0,
       });
     }
 

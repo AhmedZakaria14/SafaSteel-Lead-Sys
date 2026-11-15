@@ -27,6 +27,7 @@ import {
 import { CustomField, FollowUpTask, Language, Lead, PipelineStage, Role, TeamMember } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest } from '../../lib/api';
+import { formatCairoDateTime } from '../../lib/dateFormat';
 
 interface LeadDetailViewProps {
   lang: Language;
@@ -408,11 +409,8 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                     {formatSourceDisplay(lead.source, isAr)}
                   </span>
                   <span aria-hidden="true">·</span>
-                  <span className="tabular-nums">
-                    {new Date(lead.created_at).toLocaleString(isAr ? 'ar-EG' : 'en-US', {
-                      dateStyle: 'medium',
-                      timeStyle: 'short',
-                    })}
+                  <span className="font-mono tabular-nums" dir="ltr">
+                    {formatCairoDateTime(lead.created_at, lang)}
                   </span>
                   {currentStage && (
                     <>
@@ -780,7 +778,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                   >
                     <div className="flex items-center justify-between text-slate-500 mb-1">
                       <span className="font-semibold text-slate-700 dark:text-slate-300">{n.author_name || 'System'}</span>
-                      <span className="tabular-nums">{new Date(n.created_at).toLocaleString(isAr ? 'ar-EG' : 'en-US')}</span>
+                      <span className="font-mono tabular-nums" dir="ltr">{formatCairoDateTime(n.created_at, lang)}</span>
                     </div>
                     <p className="text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">{n.content}</p>
                   </div>
@@ -840,7 +838,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                         {f.title}
                       </div>
                       <div className="text-slate-500 tabular-nums mt-0.5">
-                        {new Date(f.due_at).toLocaleString(isAr ? 'ar-EG' : 'en-US')}
+                        <span className="font-mono" dir="ltr">{formatCairoDateTime(f.due_at, lang)}</span>
                         {isOverdue && (
                           <span className="ms-2 font-semibold text-red-600 dark:text-red-400">
                             · {isAr ? 'متأخرة' : 'Overdue'}
@@ -947,14 +945,14 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
               <div className="pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2.5 text-xs">
                 <div className="flex justify-between gap-2">
                   <span className="text-slate-500">{t.lastContact}</span>
-                  <span className="text-slate-900 dark:text-slate-100 tabular-nums font-medium">
-                    {lead.last_contact_at ? lead.last_contact_at.slice(0, 16).replace('T', ' ') : '—'}
+                  <span className="font-mono text-slate-900 dark:text-slate-100 tabular-nums font-medium" dir="ltr">
+                    {lead.last_contact_at ? formatCairoDateTime(lead.last_contact_at, lang) : '—'}
                   </span>
                 </div>
                 <div className="flex justify-between gap-2">
                   <span className="text-slate-500">{t.nextFollowUp}</span>
-                  <span className="text-slate-900 dark:text-slate-100 tabular-nums font-medium">
-                    {lead.next_follow_up_at ? lead.next_follow_up_at.slice(0, 16).replace('T', ' ') : '—'}
+                  <span className="font-mono text-slate-900 dark:text-slate-100 tabular-nums font-medium" dir="ltr">
+                    {lead.next_follow_up_at ? formatCairoDateTime(lead.next_follow_up_at, lang) : '—'}
                   </span>
                 </div>
               </div>
@@ -1016,7 +1014,7 @@ export const LeadDetailView: React.FC<LeadDetailViewProps> = ({
                         {isAr ? a.description_ar : a.description_en}
                       </p>
                       <p className="text-slate-400 mt-1 tabular-nums">
-                        {a.actor_name || 'System'} · {new Date(a.created_at).toLocaleString(isAr ? 'ar-EG' : 'en-US')}
+                        {a.actor_name || 'System'} · <span className="font-mono" dir="ltr">{formatCairoDateTime(a.created_at, lang)}</span>
                       </p>
                       {meta.docUrl && (
                         <a

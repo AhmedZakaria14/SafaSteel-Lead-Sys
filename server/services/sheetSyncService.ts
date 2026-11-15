@@ -176,51 +176,85 @@ function mapSourceFromPlatform(platform?: string | null): string {
 
 /**
  * Parses `created_time` from Google Sheets (supporting ISO-8601 with timezone offsets,
- * date-only strings like `2026-11-14`, local space-separated datetimes, DD/MM/YYYY,
- * and Arabic numerals) into a normalized UTC ISO-8601 timestamp for accurate sorting.
+ * date-only strings like `2026-11-14` or `2026/11/14`, local space-separated datetimes,
+ * DD/MM/YYYY with optional AM/PM or ص/م, Google Sheets serial numbers, and Arabic numerals)
+ * into a normalized UTC ISO-8601 timestamp for accurate sorting.
  */
 export function parseSheetTimestamp(raw?: string | null, defaultOffset = '+02:00'): string {
   if (!raw) return new Date().toISOString();
   const cleaned = normalizeArabicDigits(String(raw)).trim();
   if (!cleaned) return new Date().toISOString();
 
-  // 1. Date-only YYYY-MM-DD (e.g. "2026-11-14")
-  if (/^\d{4}-\d{2}-\d{2}$/.test(cleaned)) {
-    const parsedDateOnly = new Date(`${cleaned}T08:00:00${defaultOffset}`);
+  // 0. Google Sheets numeric serial date (days since 1899-12-30, e.g., 45000 - 60000)
+  if (/^\d{5}(?:\.\d+)?$/.test(cleaned)) {
+    const serial = Number(cleaned);
+    if (serial >= 35000 && serial <= 70000) {
+      const utcMs = Math.round((serial - 25569) * 86400 * 1000);
+      const serialDate = new Date(utcMs);
+      if (!Number.isNaN(serialDate.getTime())) {
+        return serialDate.toISOString();
+      }
+    }
+  }
+
+  // 1. Date-only YYYY-MM-DD or YYYY/MM/DD (e.g. "2026-11-14")
+  const ymdOnly = cleaned.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})$/);
+  if (ymdOnly) {
+    const yyyy = ymdOnly[1];
+    const mm = ymdOnly[2].padStart(2, '0');
+    const dd = ymdOnly[3].padStart(2, '0');
+    const parsedDateOnly = new Date(`${yyyy}-${mm}-${dd}T08:00:00${defaultOffset}`);
     if (!Number.isNaN(parsedDateOnly.getTime())) {
       return parsedDateOnly.toISOString();
     }
   }
 
-  // 2. ISO or space-separated YYYY-MM-DD[T ]HH:mm(:ss)? without explicit timezone offset
-  const noTzIsoMatch = cleaned.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/);
+  // 2. ISO or space-separated YYYY[-/]MM[-/]DD[T ]HH:mm(:ss)? with optional AM/PM or ص/م and no explicit timezone offset
+  const noTzIsoMatch = cleaned.match(
+    /^(\d{4})[/-](\d{1,2})[/-](\d{1,2})[T\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:\s*(AM|PM|am|pm|ص|م))?$/
+  );
   if (noTzIsoMatch) {
-    const datePart = noTzIsoMatch[1];
-    const timePart = noTzIsoMatch[2].length === 4 ? `0${noTzIsoMatch[2]}:00` : noTzIsoMatch[2].length === 5 ? `${noTzIsoMatch[2]}:00` : noTzIsoMatch[2];
-    const withOffset = new Date(`${datePart}T${timePart}${defaultOffset}`);
+    const yyyy = noTzIsoMatch[1];
+    const mo = noTzIsoMatch[2].padStart(2, '0');
+    const dd = noTzIsoMatch[3].padStart(2, '0');
+    let hhNum = Number(noTzIsoMatch[4]);
+    const mi = noTzIsoMatch[5].padStart(2, '0');
+    const ss = (noTzIsoMatch[6] || '00').padStart(2, '0');
+    const mer = (noTzIsoMatch[7] || '').toUpperCase();
+    if ((mer === 'PM' || mer === 'م') && hhNum < 12) hhNum += 12;
+    if ((mer === 'AM' || mer === 'ص') && hhNum === 12) hhNum = 0;
+    const hh = String(hhNum).padStart(2, '0');
+    const withOffset = new Date(`${yyyy}-${mo}-${dd}T${hh}:${mi}:${ss}${defaultOffset}`);
     if (!Number.isNaN(withOffset.getTime())) {
       return withOffset.toISOString();
     }
   }
 
-  // 3. DD/MM/YYYY or D/M/YYYY with optional time
-  const dmyMatch = cleaned.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  // 3. DD/MM/YYYY or D/M/YYYY with optional time and optional AM/PM or ص/م
+  const dmyMatch = cleaned.match(
+    /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[T\s,]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM|am|pm|ص|م))?)?$/
+  );
   if (dmyMatch) {
     const p1 = Number(dmyMatch[1]);
     const p2 = Number(dmyMatch[2]);
     const year = dmyMatch[3];
-    const day = String(p1 > 12 ? p1 : p1).padStart(2, '0');
-    const month = String(p1 > 12 ? p2 : p2).padStart(2, '0');
-    const hh = String(dmyMatch[4] ?? '08').padStart(2, '0');
+    // In Egypt/Arab world DD/MM/YYYY is standard unless 2nd part > 12
+    const day = String(p2 > 12 ? p2 : p1).padStart(2, '0');
+    const month = String(p2 > 12 ? p1 : p2).padStart(2, '0');
+    let hhNum = Number(dmyMatch[4] ?? 8);
     const mm = String(dmyMatch[5] ?? '00').padStart(2, '0');
     const ss = String(dmyMatch[6] ?? '00').padStart(2, '0');
+    const mer = (dmyMatch[7] || '').toUpperCase();
+    if ((mer === 'PM' || mer === 'م') && hhNum < 12) hhNum += 12;
+    if ((mer === 'AM' || mer === 'ص') && hhNum === 12) hhNum = 0;
+    const hh = String(hhNum).padStart(2, '0');
     const dmyDate = new Date(`${year}-${month}-${day}T${hh}:${mm}:${ss}${defaultOffset}`);
     if (!Number.isNaN(dmyDate.getTime())) {
       return dmyDate.toISOString();
     }
   }
 
-  // 4. Standard ISO-8601 with timezone offset (e.g., 2026-11-14T07:40:00+02:00)
+  // 4. Standard ISO-8601 with timezone offset (e.g., 2026-11-14T07:40:00+02:00 or 2026-11-14T18:58:07-05:00)
   const direct = new Date(cleaned);
   if (!Number.isNaN(direct.getTime())) {
     return direct.toISOString();
@@ -233,14 +267,29 @@ function formatNotificationLeadTime(isoTimestamp: string, locale: 'ar' | 'en'): 
   try {
     const dt = new Date(isoTimestamp);
     if (Number.isNaN(dt.getTime())) return isoTimestamp;
-    return dt.toLocaleString(locale === 'ar' ? 'ar-EG' : 'en-US', {
+    const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Africa/Cairo',
+      calendar: 'gregory',
+      numberingSystem: 'latn',
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-    });
+      hour12: true,
+    }).formatToParts(dt);
+
+    const get = (t: string) => parts.find((p) => p.type === t)?.value || '';
+    const yyyy = get('year');
+    const mm = get('month');
+    const dd = get('day');
+    const hh = get('hour');
+    const min = get('minute');
+    const rawPeriod = get('dayPeriod').toLowerCase();
+    const isPm = rawPeriod.includes('p') || rawPeriod.includes('م');
+    const periodLabel = locale === 'ar' ? (isPm ? 'م' : 'ص') : isPm ? 'PM' : 'AM';
+
+    return `${yyyy}-${mm}-${dd} · ${hh}:${min} ${periodLabel}`;
   } catch {
     return isoTimestamp;
   }

@@ -30,6 +30,7 @@ import {
 import { CustomField, Language, Lead, PipelineStage, Role, TeamMember } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest } from '../../lib/api';
+import { formatCairoDateTime } from '../../lib/dateFormat';
 
 interface LeadsViewProps {
   lang: Language;
@@ -132,6 +133,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
   const [showColPicker, setShowColPicker] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [updatingLeadId, setUpdatingLeadId] = useState<string | null>(null);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
   const [peekLead, setPeekLead] = useState<Lead | null>(null);
 
   const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({
@@ -301,6 +303,38 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
     } catch (err: any) {
       applyLeadReadStateLocally(leadId, prevRead);
       onNotify(err.message, 'error');
+    }
+  };
+
+  const handleMarkAllNewAsRead = async () => {
+    if (markingAllRead || unreadCount <= 0) return;
+    setMarkingAllRead(true);
+    const prevCount = unreadCount;
+    const nowIso = new Date().toISOString();
+    setLeads((prev) => prev.map((l) => (l.is_read ? l : { ...l, is_read: 1, read_at: nowIso })));
+    setUnreadCount(0);
+    try {
+      const res = await apiRequest<{ ok: boolean; updatedCount: number }>(
+        `/businesses/${businessId}/leads/mark-all-read`,
+        { method: 'POST' }
+      );
+      if (readState === 'unread') {
+        setReadState('');
+      } else {
+        fetchLeads();
+      }
+      onLeadReadChanged?.();
+      onNotify(
+        isAr
+          ? `تم تحويل ${res.updatedCount || prevCount} ليد جديدة إلى مقروءة (باللون الأخضر)`
+          : `Marked ${res.updatedCount || prevCount} new leads as read`,
+        'success'
+      );
+    } catch (err: any) {
+      fetchLeads();
+      onNotify(err.message, 'error');
+    } finally {
+      setMarkingAllRead(false);
     }
   };
 
@@ -672,6 +706,22 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
             />
             <span>{isAr ? 'مقروء (السابق)' : 'Read (Previous)'}</span>
           </button>
+
+          {unreadCount > 0 && (
+            <button
+              type="button"
+              disabled={markingAllRead}
+              onClick={handleMarkAllNewAsRead}
+              className="ms-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-emerald-300 dark:border-emerald-800 bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs transition-colors whitespace-nowrap disabled:opacity-50"
+            >
+              <CheckCheck className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                {isAr
+                  ? `تحديد الجديد كمقروء (${unreadCount})`
+                  : `Mark All New Read (${unreadCount})`}
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Quick Pipeline Stage Filter Tabs */}
@@ -840,17 +890,17 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                   <div
                     key={lead.id}
                     onClick={() => onSelectLead(lead.id, lead)}
-                    className={`p-3.5 space-y-2.5 border-s-4 transition-colors crm-cv-auto ${
+                    className={`p-3 space-y-2 border-s-4 transition-colors crm-cv-auto ${
                       isUnread
-                        ? 'border-s-red-600 bg-red-50/75 dark:bg-red-950/25 active:bg-red-100/75 dark:active:bg-red-950/40'
-                        : 'border-s-emerald-600 bg-emerald-50/35 dark:bg-emerald-950/15 active:bg-emerald-50/70 dark:active:bg-emerald-950/25'
+                        ? 'border-s-red-600 bg-red-50/60 dark:bg-red-950/20 active:bg-red-100/70 dark:active:bg-red-950/35'
+                        : 'border-s-emerald-600 bg-emerald-50/30 dark:bg-emerald-950/15 active:bg-emerald-50/65 dark:active:bg-emerald-950/25'
                     }`}
                   >
-                    <div className="flex items-start justify-between gap-2.5">
-                      <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start gap-2 min-w-0 flex-1">
                         {canManage && (
                           <label
-                            className="flex items-center justify-center min-h-[36px] min-w-[28px] -ms-1 shrink-0"
+                            className="flex items-center justify-center min-h-[32px] min-w-[24px] -ms-1 shrink-0"
                             onClick={(e) => e.stopPropagation()}
                           >
                             <input
@@ -866,31 +916,33 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           </label>
                         )}
                         <div
-                          className="h-10 w-10 rounded-xl flex items-center justify-center text-xs font-bold text-white shrink-0 relative"
+                          className="h-9 w-9 rounded-lg flex items-center justify-center text-[11px] font-bold text-white shrink-0 relative mt-0.5"
                           style={{ backgroundColor: stageColor }}
                         >
                           {getInitials(lead.full_name)}
                           <span
-                            className={`absolute -top-1 -end-1 h-3 w-3 rounded-full ring-2 ring-white dark:ring-slate-900 ${
+                            className={`absolute -top-1 -end-1 h-2.5 w-2.5 rounded-full ring-2 ring-white dark:ring-slate-900 ${
                               isUnread ? 'bg-red-600' : 'bg-emerald-600'
                             }`}
                             aria-hidden="true"
                           />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          <div className="flex items-center gap-1.5">
+                            <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
+                              {lead.full_name}
+                            </h4>
                             <span
-                              className={`inline-flex items-center gap-1 font-bold ${
-                                isUnread ? 'text-red-700 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'
+                              className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold shrink-0 ${
+                                isUnread
+                                  ? 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
+                                  : 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300'
                               }`}
                             >
-                              <span
-                                className={`h-1.5 w-1.5 rounded-full ${isUnread ? 'bg-red-600' : 'bg-emerald-600'}`}
-                                aria-hidden="true"
-                              />
-                              {isUnread ? (isAr ? 'جديد · غير مقروء' : 'New · Unread') : isAr ? 'مقروء' : 'Read'}
+                              {isUnread ? (isAr ? 'جديد' : 'New') : isAr ? 'مقروء' : 'Read'}
                             </span>
-                            <span aria-hidden="true">·</span>
+                          </div>
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-slate-500 dark:text-slate-400">
                             <span className="font-mono font-semibold tabular-nums text-slate-700 dark:text-slate-300">
                               {lead.lead_code}
                             </span>
@@ -899,15 +951,19 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                               {formatSourceLabel(lead.source, isAr)}
                             </span>
                             <span aria-hidden="true">·</span>
-                            <span className="tabular-nums shrink-0">{lead.created_at.slice(0, 10)}</span>
+                            <span className="font-mono tabular-nums shrink-0" dir="ltr">
+                              {formatCairoDateTime(lead.created_at, lang)}
+                            </span>
                           </div>
-                          <h4 className="mt-0.5 text-sm font-bold text-slate-900 dark:text-slate-100 truncate">
-                            {lead.full_name}
-                          </h4>
-                          {companyName && (
-                            <div className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                              <Building2 className="h-3 w-3 shrink-0" />
-                              <span className="truncate">{companyName}</span>
+                          {(lead.interested_service || specsPreview || companyName) && (
+                            <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300 truncate">
+                              {lead.interested_service && (
+                                <span className="font-semibold text-slate-800 dark:text-slate-200">
+                                  {lead.interested_service}
+                                </span>
+                              )}
+                              {lead.interested_service && (specsPreview || companyName) && <span> · </span>}
+                              {specsPreview ? <span>{specsPreview}</span> : companyName ? <span>{companyName}</span> : null}
                             </div>
                           )}
                         </div>
@@ -919,7 +975,7 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           value={lead.status_id || ''}
                           disabled={updatingLeadId === lead.id}
                           onChange={(e) => handleQuickStatusUpdate(lead.id, e.target.value)}
-                          className="rounded-lg border px-2 py-1 min-h-[36px] text-xs font-semibold max-w-[120px] truncate"
+                          className="rounded-lg border px-2 py-1 min-h-[32px] text-[11px] font-semibold max-w-[108px] truncate"
                           style={{
                             color: stageColor,
                             backgroundColor: `${stageColor}14`,
@@ -939,21 +995,6 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       </div>
                     </div>
 
-                    {(lead.interested_service || specsPreview) && (
-                      <div className="rounded-lg bg-white/80 dark:bg-slate-950/60 border border-slate-200/70 dark:border-slate-800 px-3 py-2 text-xs">
-                        {lead.interested_service && (
-                          <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
-                            {lead.interested_service}
-                          </div>
-                        )}
-                        {specsPreview && (
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5">
-                            {specsPreview}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
                     <div
                       className="flex items-center justify-between gap-2 pt-0.5"
                       onClick={(e) => e.stopPropagation()}
@@ -962,10 +1003,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                         {primaryPhone ? (
                           <a
                             href={`tel:${primaryPhone}`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 dark:border-blue-900/70 bg-blue-50/70 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-2.5 min-h-[38px] text-xs font-semibold"
+                            className="inline-flex items-center gap-1 rounded-lg border border-blue-200 dark:border-blue-900/70 bg-blue-50/70 dark:bg-blue-950/30 text-blue-700 dark:text-blue-300 px-2 min-h-[34px] text-[11px] font-semibold"
                           >
-                            <Phone className="h-3.5 w-3.5 shrink-0" />
-                            <span className="font-mono tabular-nums truncate max-w-[115px]" dir="ltr">
+                            <Phone className="h-3 w-3 shrink-0" />
+                            <span className="font-mono tabular-nums truncate max-w-[110px]" dir="ltr">
                               {primaryPhone}
                             </span>
                           </a>
@@ -977,10 +1018,10 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                             href={`https://wa.me/${whatsappNum}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center justify-center rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 min-h-[38px] min-w-[38px]"
+                            className="inline-flex items-center justify-center rounded-lg border border-emerald-200 dark:border-emerald-900/70 bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 min-h-[34px] min-w-[34px]"
                             aria-label="WhatsApp"
                           >
-                            <MessageSquare className="h-4 w-4" />
+                            <MessageSquare className="h-3.5 w-3.5" />
                           </a>
                         )}
                         {inboxUrl && (
@@ -988,27 +1029,27 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                             href={inboxUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="inline-flex items-center justify-center rounded-lg border border-indigo-200 dark:border-indigo-900/70 bg-indigo-50/70 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 min-h-[38px] min-w-[38px]"
+                            className="inline-flex items-center justify-center rounded-lg border border-indigo-200 dark:border-indigo-900/70 bg-indigo-50/70 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 min-h-[34px] min-w-[34px]"
                             aria-label="Meta Inbox"
                           >
-                            <ExternalLink className="h-4 w-4" />
+                            <ExternalLink className="h-3.5 w-3.5" />
                           </a>
                         )}
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
                           onClick={(e) => handleOpenPeek(lead, e)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2.5 min-h-[38px] text-xs font-semibold text-slate-700 dark:text-slate-200 active:scale-[0.98]"
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 px-2 min-h-[34px] text-[11px] font-semibold text-slate-700 dark:text-slate-200 active:scale-[0.98]"
                         >
-                          <Eye className="h-3.5 w-3.5" />
+                          <Eye className="h-3 w-3" />
                           <span>{isAr ? 'معاينة' : 'Peek'}</span>
                         </button>
                         <button
                           type="button"
                           onClick={(e) => handleToggleLeadRead(lead.id, isUnread, e)}
-                          className={`inline-flex items-center justify-center rounded-lg border min-h-[38px] min-w-[38px] ${
+                          className={`inline-flex items-center justify-center rounded-lg border min-h-[34px] min-w-[34px] ${
                             isUnread
                               ? 'border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
                               : 'border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300'
@@ -1016,15 +1057,15 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           aria-label={isUnread ? (isAr ? 'تحديد كمقروء' : 'Mark Read') : isAr ? 'تحديد كغير مقروء' : 'Mark Unread'}
                           title={isUnread ? (isAr ? 'تحديد كمقروء' : 'Mark Read') : isAr ? 'تحديد كغير مقروء' : 'Mark Unread'}
                         >
-                          {isUnread ? <CheckCheck className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
+                          {isUnread ? <CheckCheck className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                         </button>
                         <button
                           type="button"
                           onClick={() => onSelectLead(lead.id, lead)}
-                          className="inline-flex items-center justify-center rounded-lg bg-[#0F1E3D] dark:bg-blue-600 text-white min-h-[38px] min-w-[38px]"
+                          className="inline-flex items-center justify-center rounded-lg bg-[#0F1E3D] dark:bg-blue-600 text-white min-h-[34px] min-w-[34px]"
                           aria-label={isAr ? 'فتح الملف' : 'Open profile'}
                         >
-                          <ArrowUpRight className="h-4 w-4" />
+                          <ArrowUpRight className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
@@ -1314,8 +1355,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                       ))}
 
                       {visibleCols.created_at && (
-                        <td className="py-3 px-3 align-top text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
-                          {lead.created_at.slice(0, 10)}
+                        <td className="py-3 px-3 align-top font-mono text-[11px] text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap" dir="ltr">
+                          {formatCairoDateTime(lead.created_at, lang)}
                         </td>
                       )}
 
@@ -1472,7 +1513,9 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                           {formatSourceLabel(peekLead.source, isAr)}
                         </span>
                         <span aria-hidden="true">·</span>
-                        <span className="tabular-nums">{peekLead.created_at.slice(0, 10)}</span>
+                        <span className="font-mono tabular-nums" dir="ltr">
+                          {formatCairoDateTime(peekLead.created_at, lang)}
+                        </span>
                       </div>
                       <h3 className="mt-1 text-lg font-bold text-slate-900 dark:text-slate-100 break-words">
                         {peekLead.full_name}
@@ -1690,11 +1733,8 @@ export const LeadsView: React.FC<LeadsViewProps> = ({
                     <Calendar className="h-3.5 w-3.5" />
                     <span>{t.createdAt}</span>
                   </span>
-                  <span className="tabular-nums text-slate-700 dark:text-slate-300">
-                    {new Date(peekLead.created_at).toLocaleString(isAr ? 'ar-EG' : 'en-US', {
-                      dateStyle: 'medium',
-                      timeStyle: 'short',
-                    })}
+                  <span className="font-mono tabular-nums text-slate-700 dark:text-slate-300" dir="ltr">
+                    {formatCairoDateTime(peekLead.created_at, lang)}
                   </span>
                 </div>
               </div>

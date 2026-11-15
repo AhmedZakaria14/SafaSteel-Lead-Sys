@@ -3,6 +3,7 @@ import { Plus, Trash2, Download, Shield, Building2 } from 'lucide-react';
 import { Business, CustomField, CustomFieldType, Language, Role } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest } from '../../lib/api';
+import { formatCairoDateTime } from '../../lib/dateFormat';
 
 interface SettingsViewProps {
   lang: Language;
@@ -328,7 +329,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
                 <div className="flex items-center justify-between text-slate-500 tabular-nums">
                   <span>{log.actor_name || log.actor_email || 'System'}</span>
-                  <span>{new Date(log.created_at).toLocaleString(isAr ? 'ar-SA' : 'en-US')}</span>
+                  <span className="font-mono" dir="ltr">{formatCairoDateTime(log.created_at, lang)}</span>
                 </div>
               </div>
             ))}
@@ -349,8 +350,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <td className="py-2 px-4 font-mono">{log.action}</td>
                     <td className="py-2 px-4">{log.actor_name || log.actor_email || 'System'}</td>
                     <td className="py-2 px-4 text-slate-500">{log.entity_type}</td>
-                    <td className="py-2 px-4 text-end tabular-nums text-slate-400">
-                      {new Date(log.created_at).toLocaleString(isAr ? 'ar-SA' : 'en-US')}
+                    <td className="py-2 px-4 text-end font-mono tabular-nums text-slate-400" dir="ltr">
+                      {formatCairoDateTime(log.created_at, lang)}
                     </td>
                   </tr>
                 ))}

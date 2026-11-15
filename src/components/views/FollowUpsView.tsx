@@ -3,6 +3,7 @@ import { Calendar, CheckCircle2, AlertCircle, Clock, ArrowUpRight } from 'lucide
 import { FollowUpTask, Language } from '../../types/crm';
 import { getT } from '../../i18n/translations';
 import { apiRequest } from '../../lib/api';
+import { formatCairoDateTime } from '../../lib/dateFormat';
 
 interface FollowUpsViewProps {
   lang: Language;
@@ -130,7 +131,7 @@ export const FollowUpsView: React.FC<FollowUpsViewProps> = ({
                       <ArrowUpRight className="h-3 w-3" />
                     </button>
                     <span>·</span>
-                    <span className="tabular-nums">{new Date(task.due_at).toLocaleString(isAr ? 'ar-SA' : 'en-US')}</span>
+                    <span className="font-mono tabular-nums" dir="ltr">{formatCairoDateTime(task.due_at, lang)}</span>
                     <span>·</span>
                     <span>{task.assigned_name || t.unassigned}</span>
                   </div>

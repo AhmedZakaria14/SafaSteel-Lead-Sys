@@ -47,6 +47,7 @@ import {
 import { getT } from './i18n/translations';
 import { ALSAFA_WORKSPACE_ID, DEFAULT_ADMIN_USERNAME, MASTER_OWNER_EMAIL } from './lib/constants';
 import { apiRequest, getAuthToken, onUnauthorized, setAuthToken } from './lib/api';
+import { formatCairoDateTime, formatCairoTimeOnly } from './lib/dateFormat';
 import {
   BrowserNotificationSupport,
   ensureNotificationServiceWorker,
@@ -193,6 +194,19 @@ function LeadFlowAppInner() {
   const seenNotificationIdsRef = useRef<Set<string>>(new Set());
   const syncInFlightRef = useRef<boolean>(false);
   const consecutiveSyncFailuresRef = useRef<number>(0);
+  const refreshDebounceTimerRef = useRef<number | null>(null);
+  const sseBatchBufferRef = useRef<NotificationItem[]>([]);
+  const sseBatchTimerRef = useRef<number | null>(null);
+
+  const requestWorkspaceRefresh = () => {
+    if (refreshDebounceTimerRef.current !== null) {
+      window.clearTimeout(refreshDebounceTimerRef.current);
+    }
+    refreshDebounceTimerRef.current = window.setTimeout(() => {
+      refreshDebounceTimerRef.current = null;
+      setRefreshCounter((c) => c + 1);
+    }, 250);
+  };
 
   const t = getT(lang);
   const isAr = lang === 'ar';
@@ -498,56 +512,128 @@ function LeadFlowAppInner() {
     }
   }, [refreshCounter]);
 
-  const emitIncomingNotification = (notif: NotificationItem) => {
-    if (!notif || !notif.id) return;
-    if (
-      effectiveRoleRef.current === 'employee' &&
-      notif.user_id &&
-      currentUserIdRef.current &&
-      notif.user_id !== currentUserIdRef.current
-    ) {
-      return;
+  const emitIncomingNotificationsBatch = (incomingList: NotificationItem[]) => {
+    if (!Array.isArray(incomingList) || incomingList.length === 0) return;
+
+    const accepted: NotificationItem[] = [];
+    for (const notif of incomingList) {
+      if (!notif || !notif.id) continue;
+      if (
+        effectiveRoleRef.current === 'employee' &&
+        notif.user_id &&
+        currentUserIdRef.current &&
+        notif.user_id !== currentUserIdRef.current
+      ) {
+        continue;
+      }
+      if (seenNotificationIdsRef.current.has(notif.id)) {
+        continue;
+      }
+      seenNotificationIdsRef.current.add(notif.id);
+      accepted.push(notif);
     }
-    if (seenNotificationIdsRef.current.has(notif.id)) {
-      return;
-    }
-    seenNotificationIdsRef.current.add(notif.id);
+
+    if (accepted.length === 0) return;
 
     setNotifications((prev) => {
-      if (prev.some((p) => p.id === notif.id)) return prev;
-      setUnreadCount((c) => c + 1);
-      return [notif, ...prev].slice(0, 50);
+      const existingIds = new Set(prev.map((p) => p.id));
+      const fresh = accepted.filter((item) => !existingIds.has(item.id));
+      if (fresh.length === 0) return prev;
+      setUnreadCount((c) => c + fresh.length);
+      return [...fresh, ...prev].slice(0, 50);
     });
 
     const liveIsAr = langRef.current === 'ar';
-    const title = liveIsAr ? notif.title_ar : notif.title_en;
-    const body = liveIsAr ? notif.message_ar : notif.message_en;
-    const linkPath = notif.link_path || '/leads';
-    const hasLeadLink = Boolean(extractLeadIdFromLinkPath(linkPath));
+    const first = accepted[0];
 
-    playNotificationSound(classifyNotificationSoundKind(notif.type), notif.id);
+    playNotificationSound(classifyNotificationSoundKind(first.type), first.id);
 
-    notify(body ? `${title} — ${body}` : title, notif.type === 'integration_failed' ? 'error' : 'info', {
-      actionLabel: hasLeadLink ? (liveIsAr ? 'فتح العميل' : 'Open Lead') : undefined,
-      onAction: hasLeadLink
-        ? () => navigateToLinkPathRef.current(linkPath, activeBusinessId, notif.id)
-        : undefined,
-    });
+    if (accepted.length === 1) {
+      const title = liveIsAr ? first.title_ar : first.title_en;
+      const body = liveIsAr ? first.message_ar : first.message_en;
+      const linkPath = first.link_path || '/leads';
+      const hasLeadLink = Boolean(extractLeadIdFromLinkPath(linkPath));
 
-    showBrowserPushNotification({
-      id: notif.id,
-      title,
-      body,
-      linkPath,
-      businessId: activeBusinessId,
-      onNavigate: (lp, lid, bid, nid) => {
-        navigateToLinkPathRef.current(lp, bid, nid, lid);
-      },
-    });
+      notify(body ? `${title} — ${body}` : title, first.type === 'integration_failed' ? 'error' : 'info', {
+        actionLabel: hasLeadLink ? (liveIsAr ? 'فتح العميل' : 'Open Lead') : undefined,
+        onAction: hasLeadLink
+          ? () => navigateToLinkPathRef.current(linkPath, activeBusinessId, first.id)
+          : undefined,
+      });
+
+      showBrowserPushNotification({
+        id: first.id,
+        title,
+        body,
+        linkPath,
+        businessId: activeBusinessId,
+        onNavigate: (lp, lid, bid, nid) => {
+          navigateToLinkPathRef.current(lp, bid, nid, lid);
+        },
+      });
+    } else {
+      // Coalesce a batch of new leads into ONE compact summary toast so mobile screen is never covered
+      const latestTitle = (liveIsAr ? first.title_ar : first.title_en)
+        .replace(/^ليد جديدة:\s*/i, '')
+        .replace(/^New Lead:\s*/i, '')
+        .trim();
+      const summaryTitle = liveIsAr
+        ? `وصلت ${accepted.length} ليدز جديدة من الشيت`
+        : `${accepted.length} new leads arrived from Sheet`;
+      const summaryBody = latestTitle
+        ? liveIsAr
+          ? `${summaryTitle} (أحدثهم: ${latestTitle})`
+          : `${summaryTitle} (Latest: ${latestTitle})`
+        : summaryTitle;
+
+      notify(summaryBody, 'info', {
+        actionLabel: liveIsAr ? 'استعراض الجديد' : 'View New',
+        onAction: () => {
+          setSelectedLeadId(null);
+          setSelectedLeadPreview(null);
+          syncLeadUrl(null);
+          setActiveTab('leads');
+        },
+      });
+
+      showBrowserPushNotification({
+        id: first.id,
+        title: summaryTitle,
+        body: latestTitle
+          ? liveIsAr
+            ? `أحدث عميل: ${latestTitle} (+${accepted.length - 1} آخرين)`
+            : `Latest: ${latestTitle} (+${accepted.length - 1} more)`
+          : summaryTitle,
+        linkPath: '/leads',
+        businessId: activeBusinessId,
+        onNavigate: (lp, lid, bid, nid) => {
+          navigateToLinkPathRef.current(lp, bid, nid, lid);
+        },
+      });
+    }
   };
 
-  const emitIncomingNotificationRef = useRef(emitIncomingNotification);
-  emitIncomingNotificationRef.current = emitIncomingNotification;
+  const emitIncomingNotificationsBatchRef = useRef(emitIncomingNotificationsBatch);
+  emitIncomingNotificationsBatchRef.current = emitIncomingNotificationsBatch;
+
+  const queueSseNotification = (notif: NotificationItem) => {
+    if (!notif || !notif.id) return;
+    if (seenNotificationIdsRef.current.has(notif.id)) return;
+    sseBatchBufferRef.current.push(notif);
+    if (sseBatchTimerRef.current !== null) {
+      window.clearTimeout(sseBatchTimerRef.current);
+    }
+    sseBatchTimerRef.current = window.setTimeout(() => {
+      sseBatchTimerRef.current = null;
+      const batch = sseBatchBufferRef.current.splice(0, sseBatchBufferRef.current.length);
+      if (batch.length > 0) {
+        emitIncomingNotificationsBatchRef.current(batch);
+      }
+    }, 350);
+  };
+
+  const queueSseNotificationRef = useRef(queueSseNotification);
+  queueSseNotificationRef.current = queueSseNotification;
 
   // Real-time Server-Sent Events (SSE) subscription for live notifications, leads & sheet updates
   useEffect(() => {
@@ -571,16 +657,16 @@ function LeadFlowAppInner() {
             const payload = JSON.parse((evt as MessageEvent).data || '{}');
             const notif: NotificationItem | undefined = payload.notification;
             if (!notif) return;
-            emitIncomingNotificationRef.current(notif);
+            queueSseNotificationRef.current(notif);
           } catch {
             // ignore malformed notification payload
           }
         });
         es.addEventListener('sheet_synced', () => {
-          setRefreshCounter((c) => c + 1);
+          requestWorkspaceRefresh();
         });
         es.addEventListener('lead_updated', () => {
-          setRefreshCounter((c) => c + 1);
+          requestWorkspaceRefresh();
         });
         es.onerror = () => {
           setSseConnected(false);
@@ -594,6 +680,10 @@ function LeadFlowAppInner() {
     return () => {
       closed = true;
       setSseConnected(false);
+      if (sseBatchTimerRef.current !== null) {
+        window.clearTimeout(sseBatchTimerRef.current);
+        sseBatchTimerRef.current = null;
+      }
       es?.close();
     };
   }, [activeBusinessId, authUser?.id]);
@@ -643,26 +733,24 @@ function LeadFlowAppInner() {
       }));
 
       if (Array.isArray(res.createdNotifications) && res.createdNotifications.length > 0) {
-        for (const notif of res.createdNotifications) {
-          emitIncomingNotificationRef.current(notif);
-        }
+        emitIncomingNotificationsBatchRef.current(res.createdNotifications);
       }
 
       if (res.createdCount > 0) {
         setLastDetectedNewCount(res.createdCount);
       }
 
-      if (options?.manual) {
+      if (options?.manual && (!res.createdNotifications || res.createdNotifications.length === 0)) {
         notify(
           langRef.current === 'ar'
-            ? `تمت مزامنة Google Sheets (${res.totalLeadsInBusiness} عميل) — +${res.createdCount} ليد جديدة (${res.syncDurationMs || 0}ms)`
-            : `Google Sheets synced (${res.totalLeadsInBusiness} leads) — +${res.createdCount} new (${res.syncDurationMs || 0}ms)`,
+            ? `تمت مزامنة Google Sheets (${res.totalLeadsInBusiness} عميل) — لا توجد ليدز جديدة (${res.syncDurationMs || 0}ms)`
+            : `Google Sheets synced (${res.totalLeadsInBusiness} leads) — up to date (${res.syncDurationMs || 0}ms)`,
           'success'
         );
       }
 
       if (options?.manual || res.createdCount > 0 || res.updatedCount > 0) {
-        setRefreshCounter((c) => c + 1);
+        requestWorkspaceRefresh();
       }
     } catch (err: any) {
       if (err?.name === 'AbortError') return;
@@ -1307,7 +1395,7 @@ function LeadFlowAppInner() {
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                       <button
                         type="button"
                         onClick={handleToggleSound}
@@ -1318,14 +1406,22 @@ function LeadFlowAppInner() {
                         }`}
                       >
                         {soundEnabled ? <Volume2 className="h-3 w-3" /> : <VolumeX className="h-3 w-3" />}
-                        <span>{soundEnabled ? (isAr ? 'الصوت مفعل' : 'Sound On') : isAr ? 'مكتوم' : 'Muted'}</span>
+                        <span>{soundEnabled ? (isAr ? 'الصوت' : 'Sound') : isAr ? 'مكتوم' : 'Muted'}</span>
                       </button>
                       <button
                         type="button"
                         onClick={handleMarkNotificationsRead}
-                        className="text-blue-600 dark:text-blue-400 font-medium hover:underline"
+                        className="text-blue-600 dark:text-blue-400 font-medium hover:underline px-1"
                       >
                         {t.markAllRead}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowNotifMenu(false)}
+                        className="rounded-md p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                        aria-label="Close notifications"
+                      >
+                        <X className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
@@ -1422,11 +1518,8 @@ function LeadFlowAppInner() {
                                 <div className="text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed break-words">
                                   {isAr ? n.message_ar : n.message_en}
                                 </div>
-                                <div className="text-[10px] text-slate-400 mt-1 tabular-nums">
-                                  {new Date(n.created_at).toLocaleString(isAr ? 'ar-EG' : 'en-US', {
-                                    dateStyle: 'short',
-                                    timeStyle: 'short',
-                                  })}
+                                <div className="font-mono text-[10px] text-slate-400 mt-1 tabular-nums" dir="ltr">
+                                  {formatCairoDateTime(n.created_at, lang)}
                                 </div>
                               </div>
                             </div>
@@ -1485,16 +1578,16 @@ function LeadFlowAppInner() {
           </div>
         )}
 
-        {/* Google Sheets Sync Status Indicator Bar */}
+        {/* Google Sheets Sync Status Indicator Bar (Compact single-line on mobile) */}
         {activeBusiness && (
           <div
-            className={`border-b px-3 sm:px-6 py-1.5 sm:py-2 flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs transition-colors ${
+            className={`border-b px-3 sm:px-6 py-1 sm:py-1.5 flex items-center justify-between gap-2 text-[11px] sm:text-xs transition-colors ${
               !browserOnline || sheetStatus?.lastError
                 ? 'bg-red-50/80 dark:bg-red-950/30 border-red-200 dark:border-red-900/60 text-red-950 dark:text-red-200'
                 : 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200/80 dark:border-emerald-900/60 text-emerald-950 dark:text-emerald-200'
             }`}
           >
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0 flex-1 overflow-hidden">
               <FileSpreadsheet
                 className={`h-3.5 w-3.5 shrink-0 ${
                   !browserOnline || sheetStatus?.lastError
@@ -1502,13 +1595,13 @@ function LeadFlowAppInner() {
                     : 'text-emerald-600 dark:text-emerald-400'
                 }`}
               />
-              <span className="font-semibold truncate max-w-[160px] sm:max-w-[260px]">
+              <span className="font-semibold truncate max-w-[110px] sm:max-w-[240px]">
                 {sheetStatus?.spreadsheetName || sheetStatus?.attachedSheetName || activeBusiness.name}
               </span>
 
               {/* Connection & Sync State Badge */}
               <span
-                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold shrink-0 ${
                   !browserOnline
                     ? 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200'
                     : sheetStatus?.lastError
@@ -1527,38 +1620,61 @@ function LeadFlowAppInner() {
                       : 'bg-emerald-600'
                   }`}
                 />
-                <span>
+                <span className="whitespace-nowrap">
                   {!browserOnline
                     ? isAr
                       ? 'غير متصل'
-                      : 'Disconnected'
+                      : 'Offline'
                     : sheetStatus?.lastError
                     ? isAr
-                      ? 'خطأ في المزامنة'
+                      ? 'خطأ مزامنة'
                       : 'Sync Error'
                     : syncingNow || sheetStatus?.isSyncing
                     ? isAr
-                      ? 'جاري المزامنة...'
+                      ? 'يزامن...'
                       : 'Syncing...'
                     : isAr
-                    ? `متصل · فحص كل ${sheetStatus?.syncIntervalSec || 15}ث${sseConnected ? ' + بث فوري' : ''}`
-                    : `Connected · ${sheetStatus?.syncIntervalSec || 15}s Poll${sseConnected ? ' + Live' : ''}`}
+                    ? `تلقائي ${sheetStatus?.syncIntervalSec || 15}ث`
+                    : `Auto ${sheetStatus?.syncIntervalSec || 15}s`}
                 </span>
               </span>
 
-              {/* New Leads Detected Badge */}
-              {(lastDetectedNewCount > 0 || (sheetStatus?.lastCreatedCount || 0) > 0) && (
-                <span className="inline-flex items-center gap-1 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white tabular-nums">
+              {/* Clickable Unread / New Leads Chip */}
+              {(typeof analytics?.summary?.unreadLeads === 'number' && analytics.summary.unreadLeads > 0) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedLeadId(null);
+                    setSelectedLeadPreview(null);
+                    syncLeadUrl(null);
+                    setActiveTab('leads');
+                  }}
+                  className="inline-flex items-center gap-1 rounded bg-red-600 hover:bg-red-700 px-1.5 py-0.5 text-[10px] font-bold text-white tabular-nums shrink-0 transition-colors"
+                >
+                  <span>
+                    {analytics.summary.unreadLeads} {isAr ? 'جديد' : 'New'}
+                  </span>
+                </button>
+              ) : (lastDetectedNewCount > 0 || (sheetStatus?.lastCreatedCount || 0) > 0) ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedLeadId(null);
+                    setSelectedLeadPreview(null);
+                    syncLeadUrl(null);
+                    setActiveTab('leads');
+                  }}
+                  className="inline-flex items-center gap-1 rounded bg-red-600 hover:bg-red-700 px-1.5 py-0.5 text-[10px] font-bold text-white tabular-nums shrink-0 transition-colors"
+                >
                   +{lastDetectedNewCount || sheetStatus?.lastCreatedCount}{' '}
-                  {isAr ? 'ليد جديدة' : 'New Leads'}
-                </span>
-              )}
+                  {isAr ? 'جديد' : 'New'}
+                </button>
+              ) : null}
 
               {/* Last Successful Sync & Duration */}
               {sheetStatus?.lastSyncAt && !sheetStatus?.lastError && (
-                <span className="text-emerald-800/80 dark:text-emerald-300/80 tabular-nums hidden md:inline">
-                  · {isAr ? 'آخر مزامنة ناجحة:' : 'Last Sync:'}{' '}
-                  {new Date(sheetStatus.lastSyncAt).toLocaleTimeString(isAr ? 'ar-EG' : 'en-US')}
+                <span className="font-mono text-[11px] text-emerald-800/80 dark:text-emerald-300/80 tabular-nums hidden md:inline shrink-0" dir="ltr">
+                  · {formatCairoTimeOnly(sheetStatus.lastSyncAt, lang)}
                   {typeof sheetStatus.lastSyncDurationMs === 'number'
                     ? ` (${sheetStatus.lastSyncDurationMs}ms)`
                     : ''}
@@ -1567,31 +1683,31 @@ function LeadFlowAppInner() {
 
               {/* Error Message Display */}
               {sheetStatus?.lastError && (
-                <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-300 font-medium truncate max-w-[260px] sm:max-w-[420px]">
+                <span className="inline-flex items-center gap-1 text-red-700 dark:text-red-300 font-medium truncate max-w-[180px] sm:max-w-[380px]">
                   <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{sheetStatus.lastError}</span>
                 </span>
               )}
             </div>
 
-            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={handleManualSheetSync}
                 disabled={syncingNow}
-                className={`inline-flex items-center gap-1 rounded-md border px-2.5 py-1 min-h-[30px] text-[11px] sm:text-xs font-semibold disabled:opacity-50 ${
+                className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 min-h-[26px] text-[11px] font-semibold disabled:opacity-50 ${
                   sheetStatus?.lastError
                     ? 'border-red-300 dark:border-red-800 bg-red-600 text-white hover:bg-red-700'
                     : 'border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-900 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40'
                 }`}
               >
                 <RefreshCw className={`h-3 w-3 ${syncingNow ? 'animate-spin' : ''}`} />
-                <span>{sheetStatus?.lastError ? (isAr ? 'إعادة المحاولة' : 'Retry Sync') : t.syncNow}</span>
+                <span>{sheetStatus?.lastError ? (isAr ? 'إعادة' : 'Retry') : t.syncNow}</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('integrations')}
-                className="hidden sm:inline-flex items-center gap-1 font-semibold underline hover: opacity-85"
+                className="hidden sm:inline-flex items-center gap-1 font-semibold underline hover:opacity-85"
               >
                 <span>{isAr ? 'إعدادات الشيت' : 'Sheet Source'}</span>
               </button>
