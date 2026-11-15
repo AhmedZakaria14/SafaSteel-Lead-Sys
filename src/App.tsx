@@ -482,6 +482,12 @@ function LeadFlowAppInner() {
   const currentUserIdRef = useRef(currentUserId);
   currentUserIdRef.current = currentUserId;
 
+  const syncIntervalSecRef = useRef<number>(15);
+  syncIntervalSecRef.current = sheetStatus?.syncIntervalSec || 15;
+
+  const analyticsTotalRef = useRef<number | null>(null);
+  analyticsTotalRef.current = typeof analytics?.summary?.total === 'number' ? analytics.summary.total : null;
+
   useEffect(() => {
     if (!activeBusinessId) return;
     const prevBiz = prevBusinessIdRef.current;
@@ -703,6 +709,7 @@ function LeadFlowAppInner() {
       const res = await apiRequest<{
         createdCount: number;
         updatedCount: number;
+        deletedCount?: number;
         skippedCount: number;
         totalLeadsInBusiness: number;
         syncDurationMs?: number;
@@ -729,6 +736,7 @@ function LeadFlowAppInner() {
         totalLeads: res.totalLeadsInBusiness ?? prev?.totalLeads,
         lastCreatedCount: res.createdCount,
         lastUpdatedCount: res.updatedCount,
+        lastDeletedCount: res.deletedCount ?? 0,
         lastNewLeads: res.newLeads || prev?.lastNewLeads || [],
       }));
 
@@ -743,13 +751,22 @@ function LeadFlowAppInner() {
       if (options?.manual && (!res.createdNotifications || res.createdNotifications.length === 0)) {
         notify(
           langRef.current === 'ar'
-            ? `تمت مزامنة Google Sheets (${res.totalLeadsInBusiness} عميل) — لا توجد ليدز جديدة (${res.syncDurationMs || 0}ms)`
-            : `Google Sheets synced (${res.totalLeadsInBusiness} leads) — up to date (${res.syncDurationMs || 0}ms)`,
+            ? `تمت مزامنة Google Sheets (${res.totalLeadsInBusiness} عميل) — متطابق 100% مع الشيت (${res.syncDurationMs || 0}ms)`
+            : `Google Sheets synced (${res.totalLeadsInBusiness} leads) — 100% in sync (${res.syncDurationMs || 0}ms)`,
           'success'
         );
       }
 
-      if (options?.manual || res.createdCount > 0 || res.updatedCount > 0) {
+      const countDiffersFromDashboard =
+        analyticsTotalRef.current !== null && analyticsTotalRef.current !== res.totalLeadsInBusiness;
+
+      if (
+        options?.manual ||
+        res.createdCount > 0 ||
+        res.updatedCount > 0 ||
+        (res.deletedCount || 0) > 0 ||
+        countDiffersFromDashboard
+      ) {
         requestWorkspaceRefresh();
       }
     } catch (err: any) {
@@ -782,14 +799,15 @@ function LeadFlowAppInner() {
     let timerId: number | null = null;
     const abortController = new AbortController();
 
-    const baseIntervalMs = Math.max(10_000, Math.min(120_000, (sheetStatus?.syncIntervalSec || 15) * 1000));
+    const getBaseIntervalMs = () =>
+      Math.max(10_000, Math.min(120_000, (syncIntervalSecRef.current || 15) * 1000));
 
     const scheduleNextTick = () => {
       if (cancelled) return;
       if (timerId !== null) window.clearTimeout(timerId);
       const failures = consecutiveSyncFailuresRef.current;
       const backoffMultiplier = failures > 0 ? Math.min(8, Math.pow(2, failures)) : 1;
-      const delayMs = Math.min(120_000, baseIntervalMs * backoffMultiplier);
+      const delayMs = Math.min(120_000, getBaseIntervalMs() * backoffMultiplier);
       timerId = window.setTimeout(async () => {
         if (cancelled) return;
         if (document.visibilityState === 'visible' && navigator.onLine) {
@@ -835,7 +853,7 @@ function LeadFlowAppInner() {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, [activeBusinessId, authUser?.id, sheetStatus?.syncIntervalSec]);
+  }, [activeBusinessId, authUser?.id]);
 
   const handleLoginSuccess = (data: {
     token: string;
@@ -1774,6 +1792,9 @@ function LeadFlowAppInner() {
                 businessId={activeBusiness.id}
                 analytics={analytics}
                 loading={analyticsLoading}
+                sheetStatus={sheetStatus}
+                syncingNow={syncingNow}
+                onSyncNow={handleManualSheetSync}
                 onSelectLead={(id, lead) => navigateToLead(id, activeBusiness.id, lead)}
                 onNavigateLeads={() => setActiveTab('leads')}
                 onNavigateFollowUps={() => setActiveTab('followups')}

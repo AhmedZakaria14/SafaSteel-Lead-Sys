@@ -927,7 +927,66 @@ describe('LeadFlow CRM Acceptance Tests', () => {
     assert.equal(statusJson.syncIntervalSec, 15);
     assert.ok(statusJson.knownLeadsCount >= 409);
   });
+
+  it('24. Reconciles deleted sheet rows during authoritative full sync while preserving manual CRM leads so dashboard analytics matches sheet 100%', async () => {
+    const { syncSheetRowsToWorkspace, parseCsvRows } = await import('../server/services/sheetSyncService.ts');
+
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'admin', password: 'SafaSteels2026' }),
+    });
+    assert.equal(loginRes.status, 200);
+    const { token } = await loginRes.json();
+
+    // Create a manual CRM lead that does NOT exist in Google Sheets (must be preserved)
+    const manualRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/leads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        fullName: 'Manual Protected Client',
+        phone: '+201055551234',
+        source: 'manual',
+      }),
+    });
+    assert.equal(manualRes.status, 201);
+    const { lead: manualLead } = await manualRes.json();
+    assert.equal(manualLead.source, 'manual');
+
+    const manualCountRow = db
+      .prepare("SELECT COUNT(*) as cnt FROM leads WHERE business_id = ? AND (source = 'manual' OR external_row_id IS NULL)")
+      .get('alsafa-steel-workspace') as { cnt: number };
+
+    // Run authoritative reconciliation with a 2-row sheet snapshot
+    const csvHeader = 'id\tcreated_time\tfull_name\tphone_number\tlead_status';
+    const rowA = 'RECONCILE_KEEP_1\t2026-11-14T10:00:00+02:00\tعميل مستمر 1\tp:+201011112222\tCREATED';
+    const rowB = 'RECONCILE_KEEP_2\t2026-11-14T11:00:00+02:00\tعميل مستمر 2\tp:+201011113333\tCREATED';
+
+    const reconcileRes = syncSheetRowsToWorkspace(db, {
+      businessId: 'alsafa-steel-workspace',
+      rows: parseCsvRows([csvHeader, rowA, rowB].join('\n')),
+      sourceLabel: 'google_sheet_live_csv',
+      reconcileMissingSheetRows: true,
+      emitNotificationOnChanges: false,
+    });
+
+    const expectedTotal = manualCountRow.cnt + 2;
+    assert.ok(reconcileRes.deletedCount > 0, 'Expected stale non-manual sheet rows absent from full live sheet to be reconciled');
+    assert.equal(
+      reconcileRes.totalLeadsInBusiness,
+      expectedTotal,
+      'Expected exactly the 2 active sheet leads + preserved manual CRM leads'
+    );
+
+    const analyticsRes = await fetch(`${baseUrl}/api/businesses/alsafa-steel-workspace/analytics`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    assert.equal(analyticsRes.status, 200);
+    const analyticsJson = await analyticsRes.json();
+    assert.equal(analyticsJson.summary.total, expectedTotal, 'Dashboard analytics summary.total must match exact reconciled count');
+  });
 });
+
 
 
 

@@ -13,9 +13,10 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts';
-import { Users, UserPlus, CheckCircle2, TrendingUp, AlertCircle, Plus, ArrowUpRight } from 'lucide-react';
+import { Users, UserPlus, CheckCircle2, TrendingUp, AlertCircle, Plus, ArrowUpRight, RefreshCw } from 'lucide-react';
 import { AnalyticsResponse, Language, Lead } from '../../types/crm';
 import { getT } from '../../i18n/translations';
+import { formatCairoTimeOnly } from '../../lib/dateFormat';
 import { GlobalLeadSearch } from '../ui/GlobalLeadSearch';
 
 interface DashboardViewProps {
@@ -23,6 +24,14 @@ interface DashboardViewProps {
   businessId: string;
   analytics: AnalyticsResponse | null;
   loading: boolean;
+  sheetStatus?: {
+    lastSyncAt?: string | null;
+    syncIntervalSec?: number;
+    totalLeads?: number;
+    status?: string;
+  } | null;
+  syncingNow?: boolean;
+  onSyncNow?: () => void;
   onSelectLead: (leadId: string, lead?: Lead) => void;
   onNavigateLeads: () => void;
   onNavigateFollowUps: () => void;
@@ -34,6 +43,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   businessId,
   analytics,
   loading,
+  sheetStatus,
+  syncingNow,
+  onSyncNow,
   onSelectLead,
   onNavigateLeads,
   onNavigateFollowUps,
@@ -88,8 +100,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       ? ` · ${isAr ? `غير مقروء: ${s.unreadLeads}` : `Unread: ${s.unreadLeads}`}`
       : '';
 
+  const syncedSub = sheetStatus?.lastSyncAt
+    ? isAr
+      ? `متطابق مع الشيت (${formatCairoTimeOnly(sheetStatus.lastSyncAt, lang)})`
+      : `Live Sheet (${formatCairoTimeOnly(sheetStatus.lastSyncAt, lang)})`
+    : `${t.receivedToday}: ${s.today} · ${t.receivedWeek}: ${s.thisWeek}`;
+
   const primaryKpis = [
-    { label: t.totalLeads, value: s.total, sub: `${t.receivedToday}: ${s.today} · ${t.receivedWeek}: ${s.thisWeek}`, icon: Users, tone: 'text-[#0F1E3D] dark:text-blue-400' },
+    { label: t.totalLeads, value: s.total, sub: syncedSub, icon: Users, tone: 'text-[#0F1E3D] dark:text-blue-400', isTotal: true },
     { label: t.newLeads, value: s.new, sub: `${t.receivedMonth}: ${s.thisMonth}${unreadSuffix}`, icon: UserPlus, tone: typeof s.unreadLeads === 'number' && s.unreadLeads > 0 ? 'text-red-600 dark:text-red-400' : 'text-blue-600 dark:text-blue-400' },
     { label: t.qualifiedLeads, value: s.qualified, sub: `${t.contactedLeads}: ${s.contacted}`, icon: TrendingUp, tone: 'text-teal-600 dark:text-teal-400' },
     { label: t.convertedLeads, value: s.converted, sub: `${t.conversionRate}: ${s.conversionRate}%`, icon: CheckCircle2, tone: 'text-emerald-600 dark:text-emerald-400' },
@@ -135,7 +153,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <span className="text-[11px] sm:text-xs font-medium text-slate-500 dark:text-slate-400 truncate">
                   {kpi.label}
                 </span>
-                <Icon className={`h-4 w-4 shrink-0 ${kpi.tone}`} />
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {kpi.isTotal && onSyncNow && (
+                    <button
+                      type="button"
+                      onClick={onSyncNow}
+                      disabled={syncingNow}
+                      title={isAr ? 'مزامنة فورية مع الشيت' : 'Sync with Google Sheet now'}
+                      className="rounded p-1 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 transition-colors disabled:opacity-50"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${syncingNow ? 'animate-spin' : ''}`} />
+                    </button>
+                  )}
+                  <Icon className={`h-4 w-4 shrink-0 ${kpi.tone}`} />
+                </div>
               </div>
               <div className="mt-1.5 sm:mt-2 text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-100 tabular-nums">
                 {kpi.value.toLocaleString()}
@@ -185,7 +216,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 {trendMode === 'daily' ? t.dailyAcquisition : trendMode === 'weekly' ? t.weeklyTrends : t.monthlyTrends}
               </h3>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {isAr ? 'محسوب مباشرة من سجلات قاعدة البيانات' : 'Calculated directly from persisted database records'}
+                {isAr
+                  ? `متطابق تلقائياً مع Google Sheets (${s.total.toLocaleString()} عميل فعلي)`
+                  : `Automatically synced with Google Sheets (${s.total.toLocaleString()} live leads)`}
               </p>
             </div>
             <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">

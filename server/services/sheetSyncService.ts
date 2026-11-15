@@ -310,6 +310,7 @@ export interface SheetSyncResult {
   processedCount: number;
   createdCount: number;
   updatedCount: number;
+  deletedCount: number;
   skippedCount: number;
   totalLeadsInBusiness: number;
   syncedAt: string;
@@ -332,6 +333,7 @@ export function syncSheetRowsToWorkspace(
     emitNotificationOnChanges?: boolean;
     integrationProvider?: 'google_sheets' | 'meta';
     syncDurationMs?: number;
+    reconcileMissingSheetRows?: boolean;
   }
 ): SheetSyncResult {
   const {
@@ -344,6 +346,7 @@ export function syncSheetRowsToWorkspace(
     recordSyncLog = true,
     emitNotificationOnChanges = true,
     integrationProvider = 'google_sheets',
+    reconcileMissingSheetRows = false,
   } = params;
 
   const startMs = Date.now();
@@ -360,6 +363,7 @@ export function syncSheetRowsToWorkspace(
       processedCount: 0,
       createdCount: 0,
       updatedCount: 0,
+      deletedCount: 0,
       skippedCount: 0,
       totalLeadsInBusiness: (
         db.prepare('SELECT COUNT(*) as cnt FROM leads WHERE business_id = ?').get(businessId) as { cnt: number }
@@ -418,11 +422,12 @@ export function syncSheetRowsToWorkspace(
 
   const existingLeads = db
     .prepare(
-      'SELECT id, lead_code, external_row_id, status_id, full_name, phone, email, interested_service, notes_summary, custom_values_json, created_at, updated_at FROM leads WHERE business_id = ?'
+      'SELECT id, lead_code, source, external_row_id, status_id, full_name, phone, email, interested_service, notes_summary, custom_values_json, created_at, updated_at FROM leads WHERE business_id = ?'
     )
     .all(businessId) as Array<{
     id: string;
     lead_code: string;
+    source: string;
     external_row_id: string | null;
     status_id: string | null;
     full_name: string;
@@ -514,6 +519,7 @@ export function syncSheetRowsToWorkspace(
 
   let createdCount = 0;
   let updatedCount = 0;
+  let deletedCount = 0;
   let skippedCount = 0;
   let processedCount = 0;
   const createdLeadsSummary: NewSheetLeadSummary[] = [];
@@ -781,6 +787,7 @@ export function syncSheetRowsToWorkspace(
         existingByExtId.set(item.externalRowId, {
           id: leadId,
           lead_code: leadCode,
+          source: item.source,
           external_row_id: item.externalRowId,
           status_id: item.mappedStatusId,
           full_name: item.rawName,
@@ -863,6 +870,46 @@ export function syncSheetRowsToWorkspace(
       }
     }
 
+    // Reconcile rows removed from the live Google Sheet (never touching manual CRM leads)
+    if (reconcileMissingSheetRows && parsedCandidates.length > 0) {
+      const deleteLeadStmt = db.prepare('DELETE FROM leads WHERE id = ? AND business_id = ?');
+      const deleteKnownStmt = db.prepare(
+        'DELETE FROM known_sheet_leads WHERE business_id = ? AND (lead_id = ? OR sheet_lead_id = ?)'
+      );
+      const deleteLeadNotifsStmt = db.prepare(
+        'DELETE FROM notifications WHERE business_id = ? AND link_path = ?'
+      );
+
+      for (const el of existingLeads) {
+        const extId = (el.external_row_id || '').trim();
+        if (!extId || el.source === 'manual') continue;
+        if (!seenInCurrentPass.has(extId)) {
+          deleteLeadNotifsStmt.run(businessId, `/leads/${el.id}`);
+          deleteKnownStmt.run(businessId, el.id, extId);
+          const delInfo = deleteLeadStmt.run(el.id, businessId);
+          if (delInfo.changes > 0) {
+            deletedCount += 1;
+          }
+        }
+      }
+
+      // Keep known_sheet_leads strictly aligned with active sheet rows
+      for (const kr of knownRows) {
+        const sheetId = (kr.sheet_lead_id || '').trim();
+        if (sheetId && !seenInCurrentPass.has(sheetId)) {
+          const matchingLead = db
+            .prepare('SELECT id, source FROM leads WHERE id = ? AND business_id = ?')
+            .get(kr.lead_id, businessId) as { id: string; source: string } | undefined;
+          if (!matchingLead || matchingLead.source !== 'manual') {
+            db.prepare('DELETE FROM known_sheet_leads WHERE business_id = ? AND sheet_lead_id = ?').run(
+              businessId,
+              kr.sheet_lead_id
+            );
+          }
+        }
+      }
+    }
+
     db.exec('COMMIT');
   } catch (err) {
     db.exec('ROLLBACK');
@@ -887,7 +934,7 @@ export function syncSheetRowsToWorkspace(
       integ.id
     );
 
-    if (recordSyncLog && (createdCount > 0 || updatedCount > 0)) {
+    if (recordSyncLog && (createdCount > 0 || updatedCount > 0 || deletedCount > 0)) {
       db.prepare(`
         INSERT INTO sync_logs (id, business_id, integration_id, direction, mode, status, processed_count, created_count, updated_count, skipped_count, details_json, started_at, finished_at)
         VALUES (?, ?, ?, 'inbound', ?, 'success', ?, ?, ?, ?, ?, ?, ?)
@@ -902,6 +949,7 @@ export function syncSheetRowsToWorkspace(
         skippedCount,
         JSON.stringify({
           totalLeadsInBusiness,
+          deletedCount,
           syncDurationMs,
           newLeadIds: createdLeadsSummary.map((l) => l.sheetLeadId),
         }),
@@ -968,11 +1016,12 @@ export function syncSheetRowsToWorkspace(
     }
   }
 
-  if (createdCount > 0 || updatedCount > 0) {
+  if (createdCount > 0 || updatedCount > 0 || deletedCount > 0) {
     broadcastWorkspaceEvent(businessId, 'sheet_synced', {
       businessId,
       createdCount,
       updatedCount,
+      deletedCount,
       skippedCount,
       totalLeadsInBusiness,
       latestLeadId: createdLeadsSummary[0]?.id || updatedLeadsSummary[0]?.id || null,
@@ -987,6 +1036,7 @@ export function syncSheetRowsToWorkspace(
     processedCount,
     createdCount,
     updatedCount,
+    deletedCount,
     skippedCount,
     totalLeadsInBusiness,
     syncedAt: finishedAt,
@@ -1043,6 +1093,7 @@ export interface WorkspaceSheetRuntimeState {
   isSyncing: boolean;
   lastAttemptAt: string | null;
   lastSuccessAt: string | null;
+  lastLiveSyncAt: string | null;
   lastSyncDurationMs: number | null;
   lastError: string | null;
   lastErrorStatus: number | null;
@@ -1050,6 +1101,7 @@ export interface WorkspaceSheetRuntimeState {
   nextAllowedRetryMs: number;
   lastCreatedCount: number;
   lastUpdatedCount: number;
+  lastDeletedCount: number;
   lastNewLeads: NewSheetLeadSummary[];
 }
 
@@ -1063,6 +1115,7 @@ export function getWorkspaceSheetSyncRuntimeState(businessId: string): Workspace
       isSyncing: false,
       lastAttemptAt: null,
       lastSuccessAt: null,
+      lastLiveSyncAt: null,
       lastSyncDurationMs: null,
       lastError: null,
       lastErrorStatus: null,
@@ -1070,6 +1123,7 @@ export function getWorkspaceSheetSyncRuntimeState(businessId: string): Workspace
       nextAllowedRetryMs: 0,
       lastCreatedCount: 0,
       lastUpdatedCount: 0,
+      lastDeletedCount: 0,
       lastNewLeads: [],
     };
     workspaceRuntimeMap.set(businessId, st);
@@ -1269,6 +1323,7 @@ export async function syncWorkspaceFromConfiguredSheet(
         runtime.lastSyncDurationMs = res.syncDurationMs;
         runtime.lastCreatedCount = res.createdCount;
         runtime.lastUpdatedCount = res.updatedCount;
+        runtime.lastDeletedCount = res.deletedCount;
         if (res.newLeads.length > 0) runtime.lastNewLeads = res.newLeads;
         return res;
       }
@@ -1343,6 +1398,8 @@ export async function syncWorkspaceFromConfiguredSheet(
           recordSyncLog: true,
           emitNotificationOnChanges: options?.emitNotificationOnChanges ?? true,
           syncDurationMs: Date.now() - startMs,
+          reconcileMissingSheetRows:
+            sourceLabel === 'google_sheet_live_csv' || sourceLabel === 'google_sheets_api_v4',
         });
 
         runtime.consecutiveFailures = 0;
@@ -1350,9 +1407,11 @@ export async function syncWorkspaceFromConfiguredSheet(
         runtime.lastError = null;
         runtime.lastErrorStatus = null;
         runtime.lastSuccessAt = res.syncedAt;
+        runtime.lastLiveSyncAt = res.syncedAt;
         runtime.lastSyncDurationMs = res.syncDurationMs;
         runtime.lastCreatedCount = res.createdCount;
         runtime.lastUpdatedCount = res.updatedCount;
+        runtime.lastDeletedCount = res.deletedCount;
         if (res.newLeads.length > 0) runtime.lastNewLeads = res.newLeads;
         return res;
       }
@@ -1369,6 +1428,7 @@ export async function syncWorkspaceFromConfiguredSheet(
       runtime.lastSyncDurationMs = fallbackRes.syncDurationMs;
       runtime.lastCreatedCount = fallbackRes.createdCount;
       runtime.lastUpdatedCount = fallbackRes.updatedCount;
+      runtime.lastDeletedCount = fallbackRes.deletedCount;
       if (fallbackRes.newLeads.length > 0) runtime.lastNewLeads = fallbackRes.newLeads;
       return fallbackRes;
     } catch (err: any) {
@@ -1397,6 +1457,73 @@ export async function syncWorkspaceFromConfiguredSheet(
 
   inFlightWorkspaceSyncs.set(businessId, runPromise);
   return runPromise;
+}
+
+/**
+ * Ensures the workspace has completed a recent live Google Sheet sync before serving
+ * analytics, leads, or status endpoints (prevents stale 406-row local snapshot on cold start).
+ * Shares in-flight requests so concurrent calls only hit Google Sheets once.
+ */
+export async function ensureWorkspaceLiveSynced(
+  db: SqlDb,
+  businessId: string,
+  options?: { maxAgeMs?: number; timeoutMs?: number; forceInTest?: boolean }
+): Promise<SheetSyncResult | null> {
+  if (process.env.NODE_ENV === 'test' && !options?.forceInTest) {
+    return null;
+  }
+
+  const runtime = getWorkspaceSheetSyncRuntimeState(businessId);
+  const existingInFlight = inFlightWorkspaceSyncs.get(businessId);
+  const maxAgeMs = options?.maxAgeMs ?? 15_000;
+  const lastLiveMs = runtime.lastLiveSyncAt ? Date.parse(runtime.lastLiveSyncAt) : 0;
+  const isFresh = lastLiveMs > 0 && Date.now() - lastLiveMs < maxAgeMs;
+
+  if (isFresh && !existingInFlight) {
+    return null;
+  }
+
+  if (!existingInFlight && runtime.nextAllowedRetryMs > Date.now()) {
+    return null;
+  }
+
+  const integ = db
+    .prepare("SELECT config_json FROM integrations WHERE business_id = ? AND provider = 'google_sheets'")
+    .get(businessId) as { config_json: string } | undefined;
+  const cfg = integ ? JSON.parse(integ.config_json || '{}') : {};
+  const hasRemoteSheet =
+    businessId === ALSAFA_WORKSPACE_ID ||
+    Boolean(cfg.publicCsvUrl || cfg.sheetUrl || cfg.spreadsheetId);
+
+  if (!hasRemoteSheet) {
+    return null;
+  }
+  if (cfg.autoScheduled === false && lastLiveMs > 0) {
+    return null;
+  }
+
+  const timeoutMs = options?.timeoutMs ?? 8000;
+  const syncPromise =
+    existingInFlight ||
+    syncWorkspaceFromConfiguredSheet(db, businessId, {
+      emitNotificationOnChanges: runtime.lastLiveSyncAt !== null,
+    });
+
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    const result = await Promise.race([
+      syncPromise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    return result;
+  } catch {
+    return null;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 const activeWatchers = new Set<string>();
@@ -1489,11 +1616,11 @@ export function startAttachedSheetWatcher(
   if (process.env.NODE_ENV !== 'test') {
     setTimeout(() => {
       syncWorkspaceFromConfiguredSheet(db, businessId, {
-        emitNotificationOnChanges: true,
+        emitNotificationOnChanges: false,
       }).catch(() => {
         // silent background fallback
       });
-    }, 800);
+    }, 20);
   }
 
   // Adaptive 15-second background polling of the connected Google Sheet

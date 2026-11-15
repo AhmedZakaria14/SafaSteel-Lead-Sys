@@ -229,8 +229,9 @@ export function ensureDemoData(db: SqlDb) {
   } else {
     ensureTwoSystemAccounts(db);
     ensureAlSafaGoogleSheetsIntegration(db);
-    // Ensure any newly appended rows in the attached sheet are synced on startup
-    if (fs.existsSync(ATTACHED_SHEET_PATH)) {
+    // In test mode only, ensure attached CSV fixture is up to date on startup;
+    // production/dev runtime syncs authoritatively from the live Google Sheet.
+    if (process.env.NODE_ENV === 'test' && fs.existsSync(ATTACHED_SHEET_PATH)) {
       syncAttachedSheetToWorkspace(db, ALSAFA_WORKSPACE_ID, ATTACHED_SHEET_PATH, {
         emitNotificationOnChanges: false,
       });

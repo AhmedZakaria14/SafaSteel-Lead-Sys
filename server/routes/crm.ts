@@ -34,6 +34,7 @@ import {
   DEFAULT_ALSAFA_SPREADSHEET_ID,
   addSseClient,
   broadcastWorkspaceEvent,
+  ensureWorkspaceLiveSynced,
   extractGoogleSheetCsvUrl,
   getWorkspaceSheetSyncRuntimeState,
   normalizeArabicDigits,
@@ -332,8 +333,9 @@ export function createCrmRoutes(
   });
 
   // Sheet Sync Status & Real-Time Source Endpoints
-  router.get('/businesses/:businessId/sheet-source/status', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
+  router.get('/businesses/:businessId/sheet-source/status', authMiddleware, requireBusinessAccess(db), async (req: AuthRequest, res) => {
     const { businessId } = req.params;
+    await ensureWorkspaceLiveSynced(db, businessId, { maxAgeMs: 15_000 });
     const integ = db
       .prepare("SELECT status, display_name, config_json, last_sync_at, last_error FROM integrations WHERE business_id = ? AND provider = 'google_sheets'")
       .get(businessId) as any;
@@ -361,6 +363,7 @@ export function createCrmRoutes(
       consecutiveFailures: runtime.consecutiveFailures,
       lastCreatedCount: runtime.lastCreatedCount,
       lastUpdatedCount: runtime.lastUpdatedCount,
+      lastDeletedCount: runtime.lastDeletedCount,
       lastNewLeads: runtime.lastNewLeads,
       publicCsvUrl: cfg.publicCsvUrl || (isAlSafa ? DEFAULT_ALSAFA_CSV_URL : null),
       sheetUrl: cfg.sheetUrl || (isAlSafa ? DEFAULT_ALSAFA_SHEET_URL : null),
@@ -693,8 +696,9 @@ export function createCrmRoutes(
   );
 
   // Leads Query with server-side pagination, search, sorting, filtering & RBAC
-  router.get('/businesses/:businessId/leads', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
+  router.get('/businesses/:businessId/leads', authMiddleware, requireBusinessAccess(db), async (req: AuthRequest, res) => {
     const { businessId } = req.params;
+    await ensureWorkspaceLiveSynced(db, businessId, { maxAgeMs: 15_000 });
     const page = Math.max(1, Number(req.query.page || 1));
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize || 25)));
     const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
@@ -1880,8 +1884,9 @@ export function createCrmRoutes(
   );
 
   // Analytics & Campaign Attribution (100% computed from real DB rows)
-  router.get('/businesses/:businessId/analytics', authMiddleware, requireBusinessAccess(db), (req: AuthRequest, res) => {
+  router.get('/businesses/:businessId/analytics', authMiddleware, requireBusinessAccess(db), async (req: AuthRequest, res) => {
     const { businessId } = req.params;
+    await ensureWorkspaceLiveSynced(db, businessId, { maxAgeMs: 15_000 });
     const isEmp = req.membership?.role === 'employee';
     const scopeWhere = isEmp ? 'l.business_id = ? AND l.assigned_to_user_id = ?' : 'l.business_id = ?';
     const scopeParams = isEmp ? [businessId, req.authUser!.id] : [businessId];
